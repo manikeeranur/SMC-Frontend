@@ -224,6 +224,14 @@ function OptionsPageInner() {
   }, [live, refresh]);
 
   // ── SMC alerts fetch + manual trigger ─────────────────────────────────────
+  async function handleLogout() {
+    try { await authApi.logout(); } catch {}
+    localStorage.removeItem("kite_auth");
+    localStorage.removeItem("kite_user");
+    setAuthenticated(false);
+    setLiveUser("");
+  }
+
   async function fetchSMCAlerts() {
     if (!expiry || isDemoMode || !authenticated) return;
     try {
@@ -388,6 +396,14 @@ function OptionsPageInner() {
             <span className={`w-1.5 h-1.5 rounded-full ${live?"bg-[#16a34a] live-pulse":"bg-[#94a3b8]"}`} />
             {live ? "LIVE" : "PAUSED"}
           </button>
+
+          {!isDemoMode && authenticated && (
+            <button onClick={handleLogout}
+              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#e11d48]/40 bg-[#e11d48]/5 text-[#e11d48] rounded-sm cursor-pointer hover:bg-[#e11d48]/15 transition-colors"
+              style={MONO} title="Logout from Kite">
+              ⏻ LOGOUT
+            </button>
+          )}
         </div>
       </header>
 

@@ -2,7 +2,7 @@
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
-const API   = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API   = process.env.NEXT_PUBLIC_API_URL || "https://smc-backend-yheu.onrender.com";
 
 interface Props {
   onConnected: (userName: string) => void;
@@ -18,7 +18,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
       if (data.error) { alert(data.error); return; }
       window.location.href = data.loginUrl;
     } catch {
-      alert("Cannot reach backend. Make sure backend is running on port 4000.");
+      alert(`Cannot reach backend at ${API}`);
     }
   }
 
@@ -54,7 +54,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
           <div className="space-y-3">
             {[
               { n:"1", text:"Open backend/.env and add your KITE_API_KEY and KITE_API_SECRET" },
-              { n:"2", text:"Set Redirect URL in Kite app to:  http://localhost:4000/api/auth/callback" },
+              { n:"2", text:`Set Redirect URL in Kite app to:  ${API}/api/auth/callback` },
               { n:"3", text:"Click Connect below — login with your Zerodha credentials" },
             ].map(({ n, text }) => (
               <div key={n} className="flex items-start gap-3">
@@ -68,7 +68,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
 
           <div className="px-3 py-2 bg-[#f1f5f9] border border-[#cbd5e1] rounded-sm">
             <div className="text-[8px] text-[#64748b] mb-1 tracking-[1.5px]" style={MONO}>KITE APP REDIRECT URL</div>
-            <div className="text-[11px] text-[#0284c7]" style={MONO}>http://localhost:4000/api/auth/callback</div>
+            <div className="text-[11px] text-[#0284c7]" style={MONO}>{API}/api/auth/callback</div>
           </div>
 
           <button onClick={handleConnect}

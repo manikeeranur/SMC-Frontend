@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, Suspense, useMemo } from "react";
 import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from "lightweight-charts";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { generateChain, getNiftyExpiries } from "@/lib/demoOptions";
 import {
   calcRR, calcPnL, calcMaxPain, calcPCR,
@@ -11,7 +11,6 @@ import {
   type WatchedOption,
 } from "@/lib/options";
 import { smcApi, optionsApi, authApi, createWS, isDemoMode, AuthError } from "@/lib/api";
-import { KiteAuth } from "@/components/KiteAuth";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
@@ -28,6 +27,7 @@ function Pill({ label, color }: { label: string; color: string }) {
 
 // ─── Inner page (uses useSearchParams — must be inside Suspense) ───────────────
 function OptionsPageInner() {
+  const router       = useRouter();
   const searchParams = useSearchParams();
   const kiteStatus   = searchParams.get("kite");
   const kiteUser     = searchParams.get("user") ?? "";
@@ -339,13 +339,10 @@ function OptionsPageInner() {
     setDragOver(null);
   }
 
-  // ── Show Kite login screen if not authenticated ─────────────────────────────
-  if (!isDemoMode && !authenticated) {
-    return <KiteAuth onConnected={(u) => {
-      setAuthenticated(true); setLiveUser(u);
-      localStorage.setItem("kite_auth", "1");
-      if (u) localStorage.setItem("kite_user", u);
-    }} errorMsg={kiteStatus === "error" ? kiteErrMsg : undefined} />;
+  // ── Redirect to login if not authenticated ──────────────────────────────────
+  if (!isDemoMode && hydrated && !authenticated) {
+    router.replace("/");
+    return null;
   }
 
   // ── Derived values ─────────────────────────────────────────────────────────

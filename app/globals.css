@@ -42,3 +42,21 @@ html, body { height: 100%; background: #f0f4f8; color: #1e293b; }
   100% { background: transparent; }
 }
 .scan-flash { animation: scan-flash 0.8s ease-out forwards; }
+
+/* ── Option chain responsive grid ────────────────────────────────────────── */
+/* Mobile default: +CE | CE LTP | STRIKE | PE LTP | +PE */
+.chain-grid { display: grid; grid-template-columns: 36px 1fr 70px 1fr 36px; }
+.chain-col-oi    { display: none !important; }
+.chain-col-extra { display: none !important; }
+
+/* md+: add OI columns */
+@media (min-width: 768px) {
+  .chain-grid { grid-template-columns: 36px 1fr 1fr 70px 1fr 1fr 36px; }
+  .chain-col-oi { display: block !important; }
+}
+
+/* xl+: add Volume + RSI columns */
+@media (min-width: 1280px) {
+  .chain-grid { grid-template-columns: 36px 1fr 1fr 1fr 1fr 70px 1fr 1fr 1fr 1fr 36px; }
+  .chain-col-extra { display: block !important; }
+}

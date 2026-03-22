@@ -236,8 +236,14 @@ function OptionsPageInner() {
     if (!expiry || isDemoMode || !authenticated) return;
     try {
       const r = await smcApi.alerts(expiry) as any;
-      setSmcAlerts(r.alerts ?? []);
+      const alerts = r.alerts ?? [];
+      setSmcAlerts(alerts);
       setSmcWinRate(r.winRate ?? null);
+      // Save to local CSV
+      if (alerts.length) {
+        const date = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
+        fetch("/api/export/live-alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alerts, date }) }).catch(() => {});
+      }
     } catch {}
   }
 
@@ -258,9 +264,14 @@ function OptionsPageInner() {
     setHistResults(null);
     try {
       const r = await smcApi.historical(histDate, expiry) as any;
-      setHistResults(r.results ?? []);
+      const results = r.results ?? [];
+      setHistResults(results);
       // also update winRate display from historical result
       if (r.winRate !== null && r.winRate !== undefined) setSmcWinRate(r.winRate);
+      // Save to local CSV
+      if (results.length) {
+        fetch("/api/export/backtest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ results, date: histDate }) }).catch(() => {});
+      }
     } catch (e: any) {
       setHistErr(e.message || "Failed to fetch historical scan");
     } finally {
@@ -393,6 +404,12 @@ function OptionsPageInner() {
             <span className={`w-1.5 h-1.5 rounded-full ${live?"bg-[#16a34a] live-pulse":"bg-[#94a3b8]"}`} />
             {live ? "LIVE" : "PAUSED"}
           </button>
+
+          <a href="/results"
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#4a6080] text-[#94a3b8] rounded-sm cursor-pointer hover:border-[#ea580c] hover:text-[#ea580c] transition-colors"
+            style={MONO} title="View CSV Results">
+            📊 RESULTS
+          </a>
 
           {!isDemoMode && authenticated && (
             <button onClick={handleLogout}

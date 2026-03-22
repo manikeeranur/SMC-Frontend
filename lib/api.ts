@@ -46,6 +46,13 @@ export const smcApi = {
   historical: (date:string, expiry:string) => req<any>(`/api/smc/historical?date=${date}&expiry=${expiry}`),
 };
 
+export const autoTradeApi = {
+  status:  () => req<any>("/api/auto-trade/status"),
+  enable:  () => req<any>("/api/auto-trade/enable",  { method:"POST" }),
+  disable: () => req<any>("/api/auto-trade/disable", { method:"POST" }),
+  clear:   () => req("/api/auto-trade/positions", { method:"DELETE" }),
+};
+
 export const watchlistApi = {
   get:    ()              => req<any[]>("/api/watchlist"),
   add:    (leg:any)       => req<any>("/api/watchlist", { method:"POST", body:JSON.stringify({ leg }) }),

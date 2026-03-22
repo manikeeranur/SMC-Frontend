@@ -10,7 +10,7 @@ import {
   type OptionsChainData, type OptionsRow, type OptionLeg,
   type WatchedOption,
 } from "@/lib/options";
-import { smcApi, optionsApi, authApi, createWS, isDemoMode, AuthError } from "@/lib/api";
+import { smcApi, optionsApi, authApi, autoTradeApi, createWS, isDemoMode, AuthError } from "@/lib/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
@@ -53,6 +53,8 @@ function OptionsPageInner() {
   const [histErr,      setHistErr]      = useState("");
   const [histResults,  setHistResults]  = useState<any[] | null>(null);
   const [dragOver,   setDragOver]   = useState<number|null>(null);
+  const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
+  const [autoPositions,    setAutoPositions]    = useState<any[]>([]);
   const [candles3m,  setCandles3m]  = useState<Record<number, any[]>>({});
   const dragIdxRef = useRef<number|null>(null);
   const [authenticated, setAuthenticated] = useState(isDemoMode);
@@ -303,6 +305,25 @@ function OptionsPageInner() {
     return () => clearInterval(t);
   }, [authenticated]);
 
+  // Poll auto-trade status every 10s when on SMC tab
+  useEffect(() => {
+    if (isDemoMode || !authenticated || activeTab !== "smc") return;
+    const tick = () => autoTradeApi.status().then((s: any) => {
+      setAutoTradeEnabled(s.enabled);
+      setAutoPositions(s.positions ?? []);
+    }).catch(() => {});
+    tick();
+    const t = setInterval(tick, 10_000);
+    return () => clearInterval(t);
+  }, [authenticated, activeTab]);
+
+  async function toggleAutoTrade() {
+    try {
+      const r = autoTradeEnabled ? await autoTradeApi.disable() : await autoTradeApi.enable();
+      setAutoTradeEnabled(r.enabled);
+    } catch {}
+  }
+
   const watchlistTokens = new Set(watchlist.map(w => w.leg.token));
 
   // ── Fetch 3-min candles for a watchlist token ──────────────────────────────
@@ -528,6 +549,9 @@ function OptionsPageInner() {
             histResults={histResults}
             onHistScan={runHistoricalSMC}
             onHistClear={() => { setHistResults(null); setHistErr(""); }}
+            autoTradeEnabled={autoTradeEnabled}
+            autoPositions={autoPositions}
+            onToggleAutoTrade={toggleAutoTrade}
           />
         )}
 
@@ -1443,6 +1467,7 @@ function PayoffPanel({ target, spot, entryPrice }: {
 function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   onTrigger, onClear, onAddWatch,
   histDate, onHistDateChange, histBusy, histErr, histResults, onHistScan, onHistClear,
+  autoTradeEnabled, autoPositions, onToggleAutoTrade,
 }: {
   alerts: any[]; winRate: number|null;
   smcStatus: {scanActive:boolean;lastScanAt:string|null;wins:number;losses:number} | null;
@@ -1451,6 +1476,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   histDate: string; onHistDateChange: (d:string) => void;
   histBusy: boolean; histErr: string; histResults: any[]|null;
   onHistScan: () => void; onHistClear: () => void;
+  autoTradeEnabled: boolean; autoPositions: any[]; onToggleAutoTrade: () => void;
 }) {
   const [mode, setMode] = useState<"live"|"backtest">("live");
 
@@ -1528,6 +1554,19 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
               {smcStatus?.lastScanAt && ` · last ${new Date(smcStatus.lastScanAt).toLocaleTimeString("en-IN",{hour12:false})}`}
             </div>
             <div className="ml-auto flex items-center gap-2">
+              {/* AUTO TRADE START / STOP */}
+              {authenticated && !isDemoMode && (
+                <button onClick={onToggleAutoTrade}
+                  className="px-3 py-1.5 text-[9px] font-bold tracking-[1.5px] rounded-sm border cursor-pointer transition-all"
+                  style={{
+                    ...MONO,
+                    background: autoTradeEnabled ? "#16a34a" : "#f8fafc",
+                    borderColor: autoTradeEnabled ? "#16a34a" : "#e11d48",
+                    color: autoTradeEnabled ? "#fff" : "#e11d48",
+                  }}>
+                  {autoTradeEnabled ? "⏹ STOP AUTO TRADE" : "▶ START AUTO TRADE"}
+                </button>
+              )}
               <button onClick={onTrigger} disabled={busy || !authenticated || isDemoMode}
                 className="px-3 py-1.5 text-[9px] font-bold tracking-[1.5px] rounded-sm border cursor-pointer disabled:opacity-40"
                 style={{...MONO, background:"#7c3aed18", borderColor:"#7c3aed", color:"#7c3aed"}}>
@@ -1579,6 +1618,30 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
           </>
         )}
       </div>
+
+      {/* ── Auto Trade Positions Panel ── */}
+      {autoPositions.length > 0 && (
+        <div className="flex-shrink-0 px-5 py-2 bg-[#f0fdf4] border-b border-[#bbf7d0]">
+          <div className="text-[8px] font-bold tracking-[1.5px] text-[#16a34a] mb-1.5" style={MONO}>
+            AUTO TRADE POSITIONS ({autoPositions.length})
+          </div>
+          <div className="flex flex-col gap-1">
+            {autoPositions.map((p: any, i: number) => (
+              <div key={i} className="flex items-center gap-3 text-[9px]" style={MONO}>
+                <span className="font-bold text-[#1e293b]">{p.tradingsymbol}</span>
+                <span className="px-1.5 py-0.5 rounded-sm text-[8px] font-bold"
+                  style={{
+                    background: p.status?.startsWith("EXITED") || p.status === "ACTIVE" ? "#16a34a22" : p.status === "ERROR" ? "#ef444422" : "#f59e0b22",
+                    color: p.status?.startsWith("EXITED") || p.status === "ACTIVE" ? "#16a34a" : p.status === "ERROR" ? "#ef4444" : "#b45309",
+                  }}>{p.status}</span>
+                {p.entryOrderId && <span className="text-[#64748b]">Entry: {p.entryOrderId}</span>}
+                {p.slOrderId    && <span className="text-[#ef4444]">SL: {p.slOrderId}</span>}
+                {p.logs?.[p.logs.length-1] && <span className="text-[#94a3b8] truncate max-w-[300px]">{p.logs[p.logs.length-1]}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Concept legend ── */}
       <div className="flex items-center gap-2 px-5 py-1.5 bg-[#fafbfc] border-b border-[#e2e8f0] flex-shrink-0 flex-wrap">

@@ -25,7 +25,7 @@ export const authApi = {
 export const optionsApi = {
   expiries:    ()                                          => req<{ expiries:string[] }>("/api/options/expiries"),
   chain:       (expiry:string, n=15)                      => req<any>(`/api/options/chain/${expiry}?strikes=${n}`),
-  candles:     (token:number, date:string, interval="minute") => req<any>(`/api/options/candles?token=${token}&date=${date}&interval=${interval}`),
+candles:     (token:number, date:string, interval="minute") => req<any>(`/api/options/candles?token=${token}&date=${date}&interval=${interval}`),
   candleRange: (token:number, from:string, to:string, interval="minute") => req<any>(`/api/options/candles?token=${token}&from=${from}&to=${to}&interval=${interval}`),
   openPrices:  (date:string, tokens:string)               => req<{ prices:Record<string,number|null> }>(`/api/options/open-prices?date=${date}&tokens=${tokens}`),
   historicalOpenPrices: (date:string, expiry:string)      => req<{ spot:number; atm:number; rows:Array<{strike:number; isATM:boolean; ce:{token:number; open:number|null}; pe:{token:number; open:number|null}}> }>(`/api/options/historical-open-prices?date=${date}&expiry=${expiry}`),

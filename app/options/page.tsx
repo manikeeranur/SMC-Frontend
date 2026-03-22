@@ -5,7 +5,7 @@ import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from "lig
 import { useSearchParams, useRouter } from "next/navigation";
 import { generateChain, getNiftyExpiries } from "@/lib/demoOptions";
 import {
-  calcRR, calcPnL, calcMaxPain, calcPCR, calcRSI,
+  calcRR, calcPnL, calcMaxPain, calcPCR,
   fmtOI, getATM,
   type OptionsChainData, type OptionsRow, type OptionLeg,
   type WatchedOption,
@@ -173,7 +173,9 @@ function OptionsPageInner() {
     if (isDemoMode) {
       const d = generateChain(expiry);
       setData(d);
-      d.rows.forEach(r => { trackCandle(r.ce.token, r.ce.ltp); trackCandle(r.pe.token, r.pe.ltp); });
+      d.rows.forEach(r => {
+        trackCandle(r.ce.token, r.ce.ltp); trackCandle(r.pe.token, r.pe.ltp);
+      });
       setWatchlist(prev => prev.map(w => {
         const row    = d.rows.find(r => r.strike === w.leg.strike);
         const newLeg = w.leg.type === "CE" ? row?.ce : row?.pe;
@@ -193,7 +195,9 @@ function OptionsPageInner() {
       setLoading(true);
       const d = await optionsApi.chain(expiry, strikeRange) as OptionsChainData;
       setData(d);
-      d.rows.forEach(r => { trackCandle(r.ce.token, r.ce.ltp); trackCandle(r.pe.token, r.pe.ltp); });
+      d.rows.forEach(r => {
+        trackCandle(r.ce.token, r.ce.ltp); trackCandle(r.pe.token, r.pe.ltp);
+      });
       setWatchlist(prev => prev.map(w => {
         const row    = d.rows.find(r => r.strike === w.leg.strike);
         const newLeg = w.leg.type === "CE" ? row?.ce : row?.pe;
@@ -469,12 +473,6 @@ function OptionsPageInner() {
             {/* ── Column headers: responsive — mobile:[+CE LTP STRIKE PE LTP +PE] md+:[+OI] xl+:[+VOL+RSI] */}
             <div className="chain-grid flex-shrink-0 border-b border-[#cbd5e1] bg-white">
               <div className="py-2.5 bg-[#e8f4ff] border-r border-[#cbd5e1]" />
-              <div className="chain-col-extra px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff]" style={MONO}>
-                <span className="text-[#0284c7]/50">CE </span>VOL
-              </div>
-              <div className="chain-col-extra px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff]" style={MONO}>
-                <span className="text-[#0284c7]/50">CE </span>RSI
-              </div>
               <div className="chain-col-oi px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff]" style={MONO}>
                 <span className="text-[#0284c7]/50">CE </span>OI
               </div>
@@ -490,16 +488,10 @@ function OptionsPageInner() {
               <div className="chain-col-oi px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3]" style={MONO}>
                 <span className="text-[#e11d48]/50">PE </span>OI
               </div>
-              <div className="chain-col-extra px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3]" style={MONO}>
-                <span className="text-[#e11d48]/50">PE </span>RSI
-              </div>
-              <div className="chain-col-extra px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3]" style={MONO}>
-                <span className="text-[#e11d48]/50">PE </span>VOL
-              </div>
               <div className="py-2.5 bg-[#fff0f3] border-l border-[#cbd5e1]" />
             </div>
             <div className="flex-1 overflow-y-auto">
-              {filteredRows.map(row => <ChainRow key={row.strike} row={row} atmStrike={atmStrike} onAddWatch={addToWatch} addedTokens={watchlistTokens} expiry={expiry} getRSI={(t) => calcRSI(priceHistRef.current[t]?.closes ?? [])} onOpenChart={(_token, strike, type, _sym) => { window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, strike, type)}`, "_blank"); }} />)}
+              {filteredRows.map(row => <ChainRow key={row.strike} row={row} atmStrike={atmStrike} onAddWatch={addToWatch} addedTokens={watchlistTokens} expiry={expiry} onOpenChart={(_token, strike, type, _sym) => { window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, strike, type)}`, "_blank"); }} />)}
             </div>
             <div className="flex-shrink-0 grid grid-cols-4 border-t border-[#cbd5e1]" style={{ gap:"1px", background:"#cbd5e1" }}>
               {[
@@ -643,22 +635,13 @@ function CandleIcon({ color }: { color: string }) {
 }
 
 // ─── CHAIN ROW ────────────────────────────────────────────────────────────────
-function rsiColor(v: number | null) {
-  if (v === null) return "#94a3b8";
-  if (v >= 70) return "#e11d48";
-  if (v <= 30) return "#16a34a";
-  return "#64748b";
-}
-
-function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, getRSI, onOpenChart }: {
+function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart }: {
   row:OptionsRow; atmStrike:number; onAddWatch:(l:OptionLeg)=>void; addedTokens:Set<number>;
-  expiry:string; getRSI:(token:number)=>number|null;
+  expiry:string;
   onOpenChart:(token:number, strike:number, type:"CE"|"PE", sym:string)=>void;
 }) {
   const { ce, pe, strike, isATM } = row;
   const rowBg = isATM ? "bg-[#eff6ff]" : "bg-white hover:bg-[#f8fafc]";
-  const ceRsi = getRSI(ce.token);
-  const peRsi = getRSI(pe.token);
   const ceAdded = addedTokens.has(ce.token);
   const peAdded = addedTokens.has(pe.token);
   return (
@@ -671,18 +654,6 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, getRSI, onO
             ${ceAdded?"bg-[#16a34a] border-[#16a34a] text-white":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30 hover:bg-[#0284c7]/25"}`}>
           {ceAdded ? "✓" : "+"}
         </button>
-      </div>
-
-      {/* CE VOL — xl only */}
-      <div className="chain-col-extra px-3 py-2 text-right bg-[#f8fbff]">
-        <span className="text-[10px] tabular-nums text-[#64748b]" style={MONO}>{fmtOI(ce.volume)}</span>
-      </div>
-
-      {/* CE RSI — xl only */}
-      <div className="chain-col-extra px-3 py-2 text-right bg-[#f8fbff]">
-        <span className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: rsiColor(ceRsi) }}>
-          {ceRsi !== null ? ceRsi.toFixed(1) : "—"}
-        </span>
       </div>
 
       {/* CE OI — bar from right toward strike — md+ only */}
@@ -743,18 +714,6 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, getRSI, onO
       <div className="chain-col-oi px-3 py-2 text-left relative overflow-hidden bg-[#fff8fa]">
         <div className="absolute left-0 top-0 bottom-0" style={{ width:`${row.peOIBar}%`, background:"rgba(225,29,72,0.08)" }} />
         <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(pe.oi)}</span>
-      </div>
-
-      {/* PE RSI — xl only */}
-      <div className="chain-col-extra px-3 py-2 text-left bg-[#fff8fa]">
-        <span className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: rsiColor(peRsi) }}>
-          {peRsi !== null ? peRsi.toFixed(1) : "—"}
-        </span>
-      </div>
-
-      {/* PE VOL — xl only */}
-      <div className="chain-col-extra px-3 py-2 text-left bg-[#fff8fa]">
-        <span className="text-[10px] tabular-nums text-[#64748b]" style={MONO}>{fmtOI(pe.volume)}</span>
       </div>
 
       {/* + PE */}

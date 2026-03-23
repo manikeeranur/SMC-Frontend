@@ -40,9 +40,13 @@ function LoginInner() {
 
   if (checking) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#080b0f]">
-        <div className="text-[#4a6080] text-sm" style={{ fontFamily: "'Space Mono', monospace" }}>
-          Checking session...
+      <div className="flex flex-col items-center justify-center h-screen gap-5" style={{ background:"#0d1117" }}>
+        <div className="relative w-12 h-12">
+          <div className="absolute inset-0 rounded-full border-2 border-[#30363d]" />
+          <div className="absolute inset-0 rounded-full border-t-2 border-[#0284c7] animate-spin" />
+        </div>
+        <div className="text-[10px] tracking-[2px]" style={{ fontFamily:"'Space Mono',monospace", color:"#484f58" }}>
+          CHECKING SESSION...
         </div>
       </div>
     );
@@ -63,9 +67,13 @@ function LoginInner() {
 export default function LoginPage() {
   return (
     <Suspense fallback={
-      <div className="flex items-center justify-center h-screen bg-[#080b0f]">
-        <div className="text-[#4a6080] text-sm" style={{ fontFamily: "'Space Mono', monospace" }}>
-          Loading...
+      <div className="flex flex-col items-center justify-center h-screen gap-5" style={{ background:"#0d1117" }}>
+        <div className="relative w-12 h-12">
+          <div className="absolute inset-0 rounded-full border-2 border-[#30363d]" />
+          <div className="absolute inset-0 rounded-full border-t-2 border-[#0284c7] animate-spin" />
+        </div>
+        <div className="text-[10px] tracking-[2px]" style={{ fontFamily:"'Space Mono',monospace", color:"#484f58" }}>
+          LOADING...
         </div>
       </div>
     }>

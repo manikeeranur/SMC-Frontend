@@ -1,8 +1,8 @@
 "use client";
 
-const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
-const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
-const API   = process.env.NEXT_PUBLIC_API_URL || "https://smc-backend-yheu.onrender.com";
+import { useState } from "react";
+
+const API = process.env.NEXT_PUBLIC_API_URL || "https://smc-backend-yheu.onrender.com";
 
 interface Props {
   onConnected: (userName: string) => void;
@@ -10,124 +10,220 @@ interface Props {
 }
 
 export function KiteAuth({ onConnected, errorMsg }: Props) {
+  const [token,   setToken]   = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadMsg, setLoadMsg] = useState("");
+  const [err,     setErr]     = useState(errorMsg ?? "");
 
-  async function handleConnect() {
+  async function handleKiteLogin() {
+    setLoading(true);
+    setLoadMsg("Connecting to Kite...");
+    setErr("");
     try {
       const res  = await fetch(`${API}/api/auth/login`);
       const data = await res.json();
-      if (data.error) { alert(data.error); return; }
+      if (data.error) { setErr(data.error); setLoading(false); return; }
+      setLoadMsg("Redirecting to Zerodha...");
       window.location.href = data.loginUrl;
     } catch {
-      alert(`Cannot reach backend at ${API}`);
+      setErr(`Cannot reach backend at ${API}`);
+      setLoading(false);
     }
   }
 
-  return (
-    <div className="flex flex-col items-center justify-center h-screen bg-[#f0f4f8] gap-8">
-      {/* Logo */}
-      <div className="text-center">
-        <div className="text-[48px] tracking-[6px] text-[#0284c7]"
-          style={{ ...BEBAS }}>
-          NIFTY<span className="text-[#ea580c]">.</span>OPTIONS
-        </div>
-        <div className="text-[11px] tracking-[3px] text-[#64748b] mt-1" style={MONO}>
-          9:26 AM SCANNER  ·  LIVE OPTION CHAIN  ·  RR 1:2.5
-        </div>
-      </div>
-
-      {/* Auth card */}
-      <div className="w-[420px] bg-white border border-[#cbd5e1] rounded-sm overflow-hidden shadow-sm">
-        <div className="px-6 py-4 border-b border-[#cbd5e1]" style={{ background: "rgba(2,132,199,0.05)" }}>
-          <div className="text-[16px] tracking-[2px] text-[#0284c7]" style={BEBAS}>CONNECT KITE ACCOUNT</div>
-          <div className="text-[10px] text-[#64748b] mt-0.5" style={MONO}>Required for live option chain data</div>
-        </div>
-
-        <div className="px-6 py-5 space-y-4">
-          {errorMsg && (
-            <div className="px-3 py-2.5 border border-[#e11d48]/40 bg-[#e11d48]/5 rounded-sm">
-              <div className="text-[10px] text-[#e11d48]" style={MONO}>
-                ✗ {decodeURIComponent(errorMsg)}
-              </div>
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {[
-              { n:"1", text:"Open backend/.env and add your KITE_API_KEY and KITE_API_SECRET" },
-              { n:"2", text:`Set Redirect URL in Kite app to:  ${API}/api/auth/callback` },
-              { n:"3", text:"Click Connect below — login with your Zerodha credentials" },
-            ].map(({ n, text }) => (
-              <div key={n} className="flex items-start gap-3">
-                <div className="w-5 h-5 rounded-full bg-[#f1f5f9] border border-[#cbd5e1] flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-[9px] text-[#64748b]" style={MONO}>{n}</span>
-                </div>
-                <div className="text-[10px] text-[#334155] leading-relaxed" style={MONO}>{text}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="px-3 py-2 bg-[#f1f5f9] border border-[#cbd5e1] rounded-sm">
-            <div className="text-[8px] text-[#64748b] mb-1 tracking-[1.5px]" style={MONO}>KITE APP REDIRECT URL</div>
-            <div className="text-[11px] text-[#0284c7]" style={MONO}>{API}/api/auth/callback</div>
-          </div>
-
-          <button onClick={handleConnect}
-            className="w-full py-3 text-[12px] font-bold tracking-[3px] bg-[#ea580c]/10 border border-[#ea580c] text-[#ea580c] rounded-sm cursor-pointer hover:bg-[#ea580c]/20 transition-colors"
-            style={MONO}>
-            ⚡ CONNECT KITE
-          </button>
-
-          <div className="flex items-center gap-3">
-            <div className="flex-1 h-px bg-[#cbd5e1]" />
-            <span className="text-[9px] text-[#94a3b8]" style={MONO}>OR</span>
-            <div className="flex-1 h-px bg-[#cbd5e1]" />
-          </div>
-
-          <ManualTokenEntry onConnected={onConnected} />
-        </div>
-      </div>
-
-      <div className="text-[9px] text-[#94a3b8] text-center" style={MONO}>
-        Powered by Kite Connect API  ·  Zerodha
-      </div>
-    </div>
-  );
-}
-
-function ManualTokenEntry({ onConnected }: { onConnected: (u: string) => void }) {
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleTokenConnect(e: React.FormEvent) {
     e.preventDefault();
-    const token = (e.currentTarget.elements.namedItem("token") as HTMLInputElement).value.trim();
-    if (!token) return;
+    if (!token.trim()) return;
+    setLoading(true);
+    setLoadMsg("Verifying token...");
+    setErr("");
     try {
       const res  = await fetch(`${API}/api/auth/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ access_token: token }),
+        body: JSON.stringify({ access_token: token.trim() }),
       });
       const data = await res.json();
-      if (data.success) onConnected("Manual");
-      else alert(data.error || "Invalid token");
+      if (data.success) {
+        setLoadMsg("Authenticated! Loading dashboard...");
+        setTimeout(() => onConnected("Manual"), 900);
+      } else {
+        setErr(data.error || "Invalid token");
+        setLoading(false);
+      }
     } catch {
-      alert("Cannot reach backend");
+      setErr("Cannot reach backend");
+      setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2">
-      <div className="text-[9px] text-[#64748b] tracking-[1.5px]" style={MONO}>
-        PASTE ACCESS TOKEN MANUALLY
+    <div className="relative flex items-center justify-center min-h-screen px-4 py-8 overflow-hidden"
+      style={{ background: "#0d1117" }}>
+
+      {/* Dot grid texture */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.022) 1px, transparent 1px)",
+        backgroundSize: "22px 22px",
+      }} />
+      {/* Faint blue glow from center */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: "radial-gradient(ellipse 70% 55% at 50% 48%, rgba(2,132,199,0.07) 0%, transparent 70%)",
+      }} />
+
+      {/* ── LOADING OVERLAY ── */}
+      {loading && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center gap-6"
+          style={{ background: "rgba(13,17,23,0.92)", backdropFilter: "blur(10px)" }}>
+          {/* Double spinner */}
+          <div className="relative w-16 h-16">
+            <div className="absolute inset-0 rounded-full" style={{ border:"2px solid #21262d" }} />
+            <div className="absolute inset-0 rounded-full animate-spin"
+              style={{ border:"2px solid transparent", borderTopColor:"#0284c7" }} />
+            <div className="absolute inset-[5px] rounded-full animate-spin"
+              style={{ border:"2px solid transparent", borderTopColor:"#ea580c", animationDirection:"reverse", animationDuration:"0.65s" }} />
+            {/* Center dot */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-2 h-2 rounded-full bg-[#0284c7]" style={{ boxShadow:"0 0 8px #0284c7" }} />
+            </div>
+          </div>
+          <div style={{ fontFamily:"'Space Mono',monospace", fontSize:10, letterSpacing:3, color:"#6e7681" }}>
+            {loadMsg.toUpperCase()}
+          </div>
+        </div>
+      )}
+
+      {/* ── CARD ── */}
+      <div className="relative z-10 w-full max-w-[400px]">
+
+        {/* Logo above card */}
+        <div className="text-center mb-8">
+          <div className="text-[36px] md:text-[42px] tracking-[5px] leading-none"
+            style={{ fontFamily:"'Bebas Neue',sans-serif", color:"#0284c7", textShadow:"0 0 24px rgba(2,132,199,0.25)" }}>
+            NIFTY<span style={{ color:"#ea580c" }}>.</span>OPTIONS
+          </div>
+          <div className="mt-2 text-[9px] tracking-[3px]"
+            style={{ fontFamily:"'Space Mono',monospace", color:"#484f58" }}>
+            LIVE CHAIN · SMC SCANNER · RR 1:2
+          </div>
+        </div>
+
+        {/* Card */}
+        <div className="rounded-2xl overflow-hidden" style={{
+          background: "linear-gradient(160deg, #1c2128 0%, #161b22 100%)",
+          border: "1px solid #30363d",
+          boxShadow: "0 0 0 1px rgba(255,255,255,0.03) inset, 0 20px 60px rgba(0,0,0,0.55)",
+        }}>
+
+          {/* Card top accent bar */}
+          <div className="h-[2px]" style={{
+            background: "linear-gradient(90deg, #0284c7 0%, #ea580c 50%, transparent 100%)",
+          }} />
+
+          <div className="px-6 md:px-8 py-7 space-y-5">
+
+            {/* Error */}
+            {err && (
+              <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl text-[11px]"
+                style={{ background:"rgba(225,29,72,0.10)", border:"1px solid rgba(225,29,72,0.28)", color:"#fca5a5", fontFamily:"'Space Mono',monospace" }}>
+                <span className="flex-shrink-0 mt-px">⚠</span>
+                <span>{decodeURIComponent(err)}</span>
+              </div>
+            )}
+
+            {/* ── Kite Login button ── */}
+            <button onClick={handleKiteLogin} disabled={loading}
+              className="w-full py-4 rounded-xl font-bold text-white text-[14px] md:text-[15px] flex items-center justify-center gap-2.5 cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-50"
+              style={{
+                background: "linear-gradient(135deg, #0284c7 0%, #0369a1 40%, #ea580c 100%)",
+                boxShadow: "0 4px 20px rgba(2,132,199,0.3), 0 1px 0 rgba(255,255,255,0.08) inset",
+                letterSpacing: 0.5,
+                fontFamily: "'DM Sans',sans-serif",
+              }}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+              </svg>
+              Login with Application
+            </button>
+
+            {/* ── Divider ── */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px" style={{ background:"#21262d" }} />
+              <span className="px-3 py-1 rounded-lg text-[8px] tracking-[2.5px] font-bold"
+                style={{ background:"#0d1117", color:"#6e7681", fontFamily:"'Space Mono',monospace", border:"1px solid #21262d" }}>
+                OR MANUAL TOKEN
+              </span>
+              <div className="flex-1 h-px" style={{ background:"#21262d" }} />
+            </div>
+
+            {/* ── Manual token form ── */}
+            <form onSubmit={handleTokenConnect} className="space-y-3">
+              {/* Input */}
+              <label className="block">
+                <div className="text-[8px] tracking-[2px] mb-2" style={{ fontFamily:"'Space Mono',monospace", color:"#6e7681" }}>
+                  ACCESS TOKEN
+                </div>
+                <div className="flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all"
+                  style={{ background:"#0d1117", border:"1px solid #30363d" }}
+                  onFocus={() => {}} /* handled by child */
+                  >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6e7681" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+                    <circle cx="8" cy="15" r="4"/><path d="m15 7-3 3"/><path d="m17 5 2 2"/><path d="m12 10 5-5"/>
+                  </svg>
+                  <input
+                    type="text"
+                    name="access_token"
+                    autoComplete="on"
+                    value={token}
+                    onChange={e => setToken(e.target.value)}
+                    placeholder="Paste your Kite access token"
+                    className="flex-1 bg-transparent outline-none text-[12px] md:text-[13px]"
+                    style={{ fontFamily:"'Space Mono',monospace", color:"#c9d1d9", caretColor:"#0284c7" }}
+                  />
+                  {token && (
+                    <button type="button" onClick={() => setToken("")}
+                      className="flex-shrink-0 w-4 h-4 flex items-center justify-center cursor-pointer transition-opacity hover:opacity-70"
+                      style={{ color:"#6e7681" }}>×</button>
+                  )}
+                </div>
+              </label>
+
+              {/* Connect button */}
+              <button type="submit" disabled={loading || !token.trim()}
+                className="w-full py-3.5 rounded-xl font-bold text-[12px] cursor-pointer transition-all hover:brightness-110 active:scale-[0.98] disabled:opacity-35 disabled:cursor-not-allowed"
+                style={{
+                  background: token.trim() ? "#21262d" : "#161b22",
+                  border: `1px solid ${token.trim() ? "#0284c7" : "#30363d"}`,
+                  color: token.trim() ? "#58a6ff" : "#6e7681",
+                  letterSpacing: 2,
+                  fontFamily: "'Space Mono',monospace",
+                  transition: "all 0.2s",
+                }}>
+                Connect with Token
+              </button>
+            </form>
+          </div>
+
+          {/* Footer */}
+          <div className="px-8 py-3 flex items-center justify-between"
+            style={{ background:"#0d1117", borderTop:"1px solid #21262d" }}>
+            <span className="text-[8px] tracking-[1.5px]"
+              style={{ fontFamily:"'Space Mono',monospace", color:"#484f58" }}>
+              KITE CONNECT · ZERODHA
+            </span>
+            <span className="text-[8px] tracking-[1px]"
+              style={{ fontFamily:"'Space Mono',monospace", color:"#30363d" }}>
+              v2.0
+            </span>
+          </div>
+        </div>
+
+        {/* Below card hint */}
+        <div className="mt-5 text-center text-[9px] tracking-[1px]"
+          style={{ fontFamily:"'Space Mono',monospace", color:"#30363d" }}>
+          Session persists until token expires
+        </div>
       </div>
-      <div className="flex gap-2">
-        <input name="token" type="text" placeholder="access_token from Kite session"
-          className="flex-1 bg-[#f1f5f9] border border-[#cbd5e1] text-[#334155] px-3 py-2 text-[10px] rounded-sm outline-none focus:border-[#0284c7]"
-          style={MONO} />
-        <button type="submit"
-          className="px-3 py-2 text-[10px] bg-[#0284c7]/10 border border-[#0284c7]/40 text-[#0284c7] rounded-sm cursor-pointer hover:bg-[#0284c7]/20"
-          style={MONO}>
-          SET
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }

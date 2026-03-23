@@ -225,11 +225,11 @@ function OptionsPageInner() {
   useEffect(() => { if (expiry && (isDemoMode || authenticated)) refresh(); }, [expiry, refresh, authenticated]);
 
   useEffect(() => {
-    const interval = isDemoMode ? 2000 : 5000;
+    const interval = isDemoMode ? 2000 : smcStatus?.marketOpen ? 1000 : 5000;
     if (live) tickRef.current = setInterval(refresh, interval);
     else clearInterval(tickRef.current);
     return () => clearInterval(tickRef.current);
-  }, [live, refresh]);
+  }, [live, refresh, smcStatus?.marketOpen]);
 
   // ── SMC alerts fetch + manual trigger ─────────────────────────────────────
   async function handleLogout() {
@@ -287,14 +287,15 @@ function OptionsPageInner() {
     }
   }
 
-  // Auto-refresh SMC alerts every 60 seconds when on SMC tab
+  // Auto-refresh SMC alerts — 1s during market hours, 60s outside
   useEffect(() => {
     if (activeTab !== "smc" || !authenticated || isDemoMode) return;
     fetchSMCAlerts();
-    const t = setInterval(fetchSMCAlerts, 60_000);
+    const interval = smcStatus?.marketOpen ? 1000 : 60_000;
+    const t = setInterval(fetchSMCAlerts, interval);
     return () => clearInterval(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, expiry, authenticated]);
+  }, [activeTab, expiry, authenticated, smcStatus?.marketOpen]);
 
   // Fetch SMC status every 30s
   useEffect(() => {
@@ -1508,7 +1509,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   const totalLotPnl   = tableAlerts.reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
   const realizedLotPnl = tableAlerts.filter(a => a.status !== "ACTIVE").reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
 
-  const COLS = "40px 60px 1fr 80px 70px 72px 72px 72px 90px 130px 80px";
+  const COLS = "40px 60px 1fr 80px 70px 72px 72px 72px 72px 90px 130px 80px";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -1656,7 +1657,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       {/* ── Table header ── */}
       <div className="grid flex-shrink-0 border-b-2 border-[#cbd5e1] bg-[#f8fafc]"
         style={{ gridTemplateColumns: COLS }}>
-        {["#","TIME","SIGNALS","STRIKE","LTP","SL","T1","T2","STATUS","P&L · LOT (65)",""].map(h => (
+        {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)",""].map(h => (
           <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase" style={MONO}>{h}</div>
         ))}
       </div>
@@ -1746,10 +1747,29 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   <div className="text-[8px] text-[#94a3b8]" style={MONO}>spot {a.spot?.toFixed(0)}</div>
                 </div>
 
-                {/* LTP (entry) */}
+                {/* ENTRY */}
                 <div className="px-2 py-2.5 text-[12px] font-bold tabular-nums" style={{...MONO, color:dirColor}}>
                   ₹{a.rr?.entry?.toFixed(2) ?? "—"}
                 </div>
+
+                {/* CMP — live market price */}
+                {(() => {
+                  const cmp = a.lastLtp ?? a.rr?.entry ?? 0;
+                  const cmpColor = a.status !== "ACTIVE" ? "#94a3b8"
+                    : cmp >= (a.rr?.entry ?? 0) ? "#16a34a" : "#e11d48";
+                  return (
+                    <div className="px-2 py-2.5" style={MONO}>
+                      <div className="text-[12px] font-bold tabular-nums" style={{color: cmpColor}}>
+                        ₹{cmp.toFixed(2)}
+                      </div>
+                      {a.status === "ACTIVE" && (
+                        <div className="text-[8px]" style={{color: cmpColor}}>
+                          {cmp >= (a.rr?.entry ?? 0) ? "▲" : "▼"}{Math.abs(cmp - (a.rr?.entry ?? 0)).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* SL */}
                 <div className="px-2 py-2.5 text-[11px] font-bold tabular-nums text-[#e11d48]" style={MONO}>

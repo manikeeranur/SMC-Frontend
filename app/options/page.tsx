@@ -43,7 +43,7 @@ function OptionsPageInner() {
   const [watchlist, setWatchlist]     = useState<WatchedOption[]>([]);
   const [smcAlerts,    setSmcAlerts]    = useState<any[]>([]);
   const [smcWinRate,   setSmcWinRate]   = useState<number|null>(null);
-  const [smcStatus,    setSmcStatus]    = useState<{scanActive:boolean;lastScanAt:string|null;wins:number;losses:number}|null>(null);
+  const [smcStatus,    setSmcStatus]    = useState<{scanActive:boolean;marketOpen:boolean;lastScanAt:string|null;wins:number;losses:number}|null>(null);
   const [smcBusy,      setSmcBusy]      = useState(false);
   const [histDate,     setHistDate]     = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 1);

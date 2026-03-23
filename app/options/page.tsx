@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, Suspense, useMemo } from "react";
+import { IconLogout } from "@tabler/icons-react";
 import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from "lightweight-charts";
 import { useSearchParams, useRouter } from "next/navigation";
 import { generateChain, getNiftyExpiries } from "@/lib/demoOptions";
@@ -486,9 +487,9 @@ function OptionsPageInner() {
 
           {!isDemoMode && authenticated && (
             <button onClick={handleLogout}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#e11d48]/40 bg-[#e11d48]/5 text-[#e11d48] rounded-sm cursor-pointer hover:bg-[#e11d48]/15 transition-colors"
-              style={MONO} title="Logout">
-              ⏻
+              className="flex items-center justify-center w-8 h-8 border border-[#e11d48]/40 bg-[#e11d48]/5 text-[#e11d48] rounded-sm cursor-pointer hover:bg-[#e11d48]/15 transition-colors"
+              title="Logout">
+              <IconLogout size={15} stroke={2} />
             </button>
           )}
         </div>

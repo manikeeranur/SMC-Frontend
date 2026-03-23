@@ -96,18 +96,6 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
       {/* ── CARD ── */}
       <div className="relative z-10 w-full max-w-[400px]">
 
-        {/* Logo above card */}
-        <div className="text-center mb-8">
-          <div className="text-[36px] md:text-[42px] tracking-[5px] leading-none"
-            style={{ fontFamily:"'Bebas Neue',sans-serif", color:"#0284c7", textShadow:"0 0 24px rgba(2,132,199,0.25)" }}>
-            NIFTY<span style={{ color:"#ea580c" }}>.</span>OPTIONS
-          </div>
-          <div className="mt-2 text-[9px] tracking-[3px]"
-            style={{ fontFamily:"'Space Mono',monospace", color:"#484f58" }}>
-            LIVE CHAIN · SMC SCANNER · RR 1:2
-          </div>
-        </div>
-
         {/* Card */}
         <div className="rounded-2xl overflow-hidden" style={{
           background: "linear-gradient(160deg, #1c2128 0%, #161b22 100%)",

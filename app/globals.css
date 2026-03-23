@@ -31,6 +31,11 @@ html, body { height: 100%; background: #f0f4f8; color: #1e293b; }
 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
+/* Dark mode scrollbar */
+[data-dark="true"] ::-webkit-scrollbar-track { background: #1e293b; }
+[data-dark="true"] ::-webkit-scrollbar-thumb { background: #334155; }
+[data-dark="true"] ::-webkit-scrollbar-thumb:hover { background: #475569; }
+
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.3; }
@@ -44,12 +49,62 @@ html, body { height: 100%; background: #f0f4f8; color: #1e293b; }
 .scan-flash { animation: scan-flash 0.8s ease-out forwards; }
 
 /* ── Option chain responsive grid ────────────────────────────────────────── */
-/* Mobile default: +CE | CE LTP | STRIKE | PE LTP | +PE */
 .chain-grid { display: grid; grid-template-columns: 36px 1fr 70px 1fr 36px; }
 .chain-col-oi { display: none !important; }
 
-/* md+: add OI columns */
 @media (min-width: 768px) {
   .chain-grid { grid-template-columns: 36px 1fr 1fr 70px 1fr 1fr 36px; }
   .chain-col-oi { display: block !important; }
+}
+
+/* ── Mobile responsive utilities ─────────────────────────────────────────── */
+.mobile-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.mobile-hide   { display: none; }
+.mobile-stack  { flex-direction: column; }
+
+@media (min-width: 640px) {
+  .mobile-hide  { display: flex; }
+}
+
+/* ── Header responsive ────────────────────────────────────────────────────── */
+.header-stats { display: none; gap: 20px; align-items: baseline; }
+@media (min-width: 768px) {
+  .header-stats { display: flex; }
+}
+
+/* ── Tab bar scroll on mobile ────────────────────────────────────────────── */
+.tab-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  white-space: nowrap;
+}
+.tab-scroll::-webkit-scrollbar { display: none; }
+
+/* ── Dark mode global overrides ──────────────────────────────────────────── */
+[data-dark="true"] {
+  color-scheme: dark;
+  background: #0d1117;
+  color: #c9d1d9;
+}
+
+/* select dropdowns */
+[data-dark="true"] select {
+  background-color: var(--c-muted) !important;
+  color: var(--c-text) !important;
+  border-color: var(--c-border) !important;
+}
+[data-dark="true"] option {
+  background-color: #1e293b;
+  color: #c9d1d9;
+}
+
+/* input fields */
+[data-dark="true"] input[type="date"],
+[data-dark="true"] input[type="text"],
+[data-dark="true"] input {
+  background-color: var(--c-muted) !important;
+  color: var(--c-text) !important;
+  border-color: var(--c-border) !important;
 }

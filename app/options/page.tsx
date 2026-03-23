@@ -64,9 +64,28 @@ function OptionsPageInner() {
   const [ohlcCE,   setOhlcCE]         = useState<{token:number; strike:number} | null>(null);
   const [ohlcPE,   setOhlcPE]         = useState<{token:number; strike:number} | null>(null);
   const [ohlcBusy, setOhlcBusy]       = useState(false);
+  const [dark,     setDark]           = useState(false);
+
+  // Theme CSS custom properties (cascade to all children via root div)
+  const th = {
+    '--c-bg':     dark ? '#0d1117' : '#f0f4f8',
+    '--c-card':   dark ? '#161b22' : '#ffffff',
+    '--c-sub':    dark ? '#1c2128' : '#fafbfc',
+    '--c-muted':  dark ? '#21262d' : '#f1f5f9',
+    '--c-text':   dark ? '#c9d1d9' : '#1e293b',
+    '--c-text2':  dark ? '#8b949e' : '#475569',
+    '--c-text3':  dark ? '#6e7681' : '#64748b',
+    '--c-text4':  dark ? '#484f58' : '#94a3b8',
+    '--c-border': dark ? '#30363d' : '#cbd5e1',
+    '--c-bord2':  dark ? '#21262d' : '#e2e8f0',
+    '--c-row2':   dark ? '#1a1f27' : '#fafafa',
+    '--c-hover':  dark ? '#1f2937' : '#f0f4ff',
+  } as React.CSSProperties;
 
   // Restore all persisted state after mount (avoids SSR hydration mismatch)
   useEffect(() => {
+    const savedDark = localStorage.getItem("dark_mode");
+    if (savedDark === "1") setDark(true);
     if (!isDemoMode && localStorage.getItem("kite_auth") === "1") {
       setAuthenticated(true);
       const u = localStorage.getItem("kite_user");
@@ -83,6 +102,10 @@ function OptionsPageInner() {
     if (!hydrated) return;
     try { localStorage.setItem("kite_watchlist", JSON.stringify(watchlist)); } catch {}
   }, [watchlist, hydrated]);
+
+  useEffect(() => {
+    try { localStorage.setItem("dark_mode", dark ? "1" : "0"); } catch {}
+  }, [dark]);
 
 
   const tickRef      = useRef<ReturnType<typeof setInterval>>();
@@ -398,69 +421,90 @@ function OptionsPageInner() {
   }) : [];
 
   return (
-    <div className="flex flex-col h-screen bg-[#f0f4f8] overflow-hidden" style={{ fontFamily:"'DM Sans',sans-serif" }}>
+    <div data-dark={dark ? "true" : "false"} className="flex flex-col h-screen overflow-hidden"
+      style={{ fontFamily:"'DM Sans',sans-serif", background:"var(--c-bg)", color:"var(--c-text)", ...th }}>
 
       {/* ══ HEADER ══ */}
-      <header className="flex items-center justify-between px-5 h-[52px] bg-white border-b border-[#cbd5e1] flex-shrink-0">
-        <div className="flex items-center gap-5">
-          <div className="text-[20px] tracking-[3px] text-[#0284c7]" style={{ ...BEBAS, textShadow:"0 0 16px rgba(2,132,199,.15)" }}>
+      <header className="flex items-center justify-between px-3 md:px-5 h-[52px] flex-shrink-0 border-b"
+        style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
+        <div className="flex items-center gap-3 md:gap-5 min-w-0">
+          <div className="text-[18px] md:text-[20px] tracking-[3px] text-[#0284c7] flex-shrink-0" style={{ ...BEBAS, textShadow:"0 0 16px rgba(2,132,199,.15)" }}>
             NIFTY<span className="text-[#ea580c]">.</span>OPTIONS
           </div>
-          <StatBadge label="NIFTY" val={data?.spot.toFixed(2) ?? "—"} color="#0284c7" big />
-          <StatBadge label="ATM IV" val={data ? `${data.atmIV.toFixed(2)}%` : "—"} color="#b45309" />
-          <StatBadge label="PCR OI" val={pcrOI.toFixed(3)} color={pcrOI>=1.2?"#16a34a":pcrOI<=0.8?"#e11d48":"#b45309"} />
-          <StatBadge label="MAX PAIN" val={maxPain ? String(maxPain) : "—"} color="#ea580c" />
+          <div className="header-stats">
+            <StatBadge label="NIFTY" val={data?.spot.toFixed(2) ?? "—"} color="#0284c7" big />
+            <StatBadge label="ATM IV" val={data ? `${data.atmIV.toFixed(2)}%` : "—"} color="#b45309" />
+            <StatBadge label="PCR OI" val={pcrOI.toFixed(3)} color={pcrOI>=1.2?"#16a34a":pcrOI<=0.8?"#e11d48":"#b45309"} />
+            <StatBadge label="MAX PAIN" val={maxPain ? String(maxPain) : "—"} color="#ea580c" />
+          </div>
+          {/* Mobile: show NIFTY spot only */}
+          <div className="flex md:hidden items-baseline gap-1">
+            <span className="text-[9px] tracking-[2px]" style={{ ...MONO, color:"var(--c-text3)" }}>NIFTY</span>
+            <span className="text-[16px] font-bold text-[#0284c7]" style={MONO}>{data?.spot.toFixed(0) ?? "—"}</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
           {isDemoMode
             ? <Pill label="DEMO MODE" color="#ea580c" />
-            : <div className="flex items-center gap-1.5 px-2 py-1 border border-[#16a34a]/40 bg-[#16a34a]/5 rounded-sm">
+            : <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 border border-[#16a34a]/40 bg-[#16a34a]/5 rounded-sm">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] live-pulse" />
-                <span className="text-[9px] text-[#16a34a]" style={MONO}>KITE LIVE{liveUser ? ` · ${liveUser}` : ""}</span>
+                <span className="text-[9px] text-[#16a34a]" style={MONO}>LIVE{liveUser ? ` · ${liveUser}` : ""}</span>
               </div>
           }
 
-          {loading && <span className="text-[9px] text-[#64748b]" style={MONO}>fetching...</span>}
+          {loading && <span className="hidden sm:block text-[9px]" style={{ ...MONO, color:"var(--c-text3)" }}>fetching...</span>}
 
           <select value={expiry} onChange={e => setExpiry(e.target.value)}
-            className="bg-[#f1f5f9] border border-[#cbd5e1] text-[#1e293b] px-3 py-1.5 text-[11px] rounded-sm outline-none cursor-pointer" style={MONO}>
+            className="px-2 py-1.5 text-[11px] rounded-sm outline-none cursor-pointer border" style={{ ...MONO, background:"var(--c-muted)", borderColor:"var(--c-border)", color:"var(--c-text)" }}>
             {expiries.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
 
-          <span className="text-[11px] text-[#ea580c]" style={MONO}>{data?.daysToExpiry.toFixed(1) ?? "—"}d</span>
+          <span className="text-[11px] text-[#ea580c] hidden sm:block" style={MONO}>{data?.daysToExpiry.toFixed(1) ?? "—"}d</span>
 
           <button onClick={() => setLive(v => !v)}
-            className={`flex items-center gap-2 px-3 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors ${live?"bg-[#16a34a]/10 border-[#16a34a] text-[#16a34a]":"bg-transparent border-[#cbd5e1] text-[#64748b]"}`} style={MONO}>
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors ${live?"bg-[#16a34a]/10 border-[#16a34a] text-[#16a34a]":"border text-[#64748b]"}`}
+            style={!live ? { borderColor:"var(--c-border)", color:"var(--c-text3)" } : {}} >
             <span className={`w-1.5 h-1.5 rounded-full ${live?"bg-[#16a34a] live-pulse":"bg-[#94a3b8]"}`} />
-            {live ? "LIVE" : "PAUSED"}
+            <span style={MONO}>{live ? "LIVE" : "OFF"}</span>
+          </button>
+
+          {/* Dark mode toggle */}
+          <button onClick={() => setDark(d => !d)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors"
+            style={{ ...MONO, borderColor:"var(--c-border)", color:"var(--c-text3)", background:"var(--c-muted)" }}
+            title={dark ? "Light mode" : "Dark mode"}>
+            {dark ? "☀" : "🌙"}
           </button>
 
           <a href="/results"
-            className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#4a6080] text-[#94a3b8] rounded-sm cursor-pointer hover:border-[#ea580c] hover:text-[#ea580c] transition-colors"
-            style={MONO} title="View CSV Results">
-            📊 RESULTS
+            className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 text-[10px] rounded-sm cursor-pointer hover:text-[#ea580c] transition-colors border"
+            style={{ ...MONO, borderColor:"var(--c-border)", color:"var(--c-text4)" }}
+            title="View CSV Results">
+            📊
           </a>
 
           {!isDemoMode && authenticated && (
             <button onClick={handleLogout}
               className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#e11d48]/40 bg-[#e11d48]/5 text-[#e11d48] rounded-sm cursor-pointer hover:bg-[#e11d48]/15 transition-colors"
-              style={MONO} title="Logout from Kite">
-              ⏻ LOGOUT
+              style={MONO} title="Logout">
+              ⏻
             </button>
           )}
         </div>
       </header>
 
       {/* ══ TAB BAR ══ */}
-      <div className="flex items-center gap-3 px-5 py-2 bg-white border-b border-[#cbd5e1] flex-shrink-0">
+      <div className="tab-scroll flex items-center gap-2 px-3 md:px-5 py-2 flex-shrink-0 border-b"
+        style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
         {(["chain","smc","watchlist","ohlc"] as const).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab as any)}
-            className={`px-3 py-1.5 text-[10px] tracking-[1px] uppercase rounded-sm border cursor-pointer transition-colors ${activeTab===tab?"bg-[#ff6b35]/20 border-[#ea580c] text-[#ea580c]":"bg-transparent border-[#cbd5e1] text-[#64748b] hover:border-[#4a6080]"}`} style={MONO}>
+            className={`px-3 py-1.5 text-[10px] tracking-[1px] uppercase rounded-sm border cursor-pointer transition-colors ${activeTab===tab?"bg-[#ff6b35]/20 border-[#ea580c] text-[#ea580c]":""}`}
+            style={activeTab!==tab ? {...MONO, borderColor:"var(--c-border)", color:"var(--c-text3)"} : MONO}>
             {tab==="chain"?"OPTIONS CHAIN":tab==="smc"?`SMC ALERTS (${smcAlerts.length})`:tab==="watchlist"?`WATCHLIST (${watchlist.length})`:"OHLC CSV"}
           </button>
         ))}
-        <div className="w-px h-4 bg-[#cbd5e1]" />
+        <div className="w-px h-4" style={{ background:"var(--c-border)" }} />
         {/* SMC live pulse */}
         {smcStatus?.scanActive && (
           <div className="flex items-center gap-1.5 px-2 py-1 bg-[#7c3aed]/8 border border-[#7c3aed]/40 rounded-sm">
@@ -468,7 +512,7 @@ function OptionsPageInner() {
             <span className="text-[9px] text-[#7c3aed] font-bold" style={MONO}>SMC SCANNING</span>
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2 text-[10px] text-[#64748b]" style={MONO}>
+        <div className="ml-auto flex items-center gap-2 text-[10px]" style={{...MONO, color:"var(--c-text3)"}}>
           {smcWinRate !== null && (
             <span className="text-[#16a34a] font-bold">{smcWinRate}% W/R</span>
           )}
@@ -483,7 +527,7 @@ function OptionsPageInner() {
         {!data && (
           <div className="flex flex-col items-center justify-center h-full gap-3">
             <div className="w-6 h-6 border-2 border-[#0284c7]/30 border-t-[#00d4ff] rounded-full animate-spin" />
-            <div className="text-[10px] text-[#64748b]" style={MONO}>
+            <div className="text-[10px]" style={{...MONO, color:"var(--c-text3)"}}>
               {isDemoMode ? "Loading demo data..." : "Fetching live option chain from Kite..."}
             </div>
           </div>
@@ -493,37 +537,37 @@ function OptionsPageInner() {
         {activeTab === "chain" && data && (
           <div className="h-full flex flex-col overflow-hidden">
             {/* ── Column headers: responsive — mobile:[+CE LTP STRIKE PE LTP +PE] md+:[+OI] xl+:[+VOL+RSI] */}
-            <div className="chain-grid flex-shrink-0 border-b border-[#cbd5e1] bg-white">
-              <div className="py-2.5 bg-[#e8f4ff] border-r border-[#cbd5e1]" />
-              <div className="chain-col-oi px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff]" style={MONO}>
+            <div className="chain-grid flex-shrink-0 border-b" style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
+              <div className="py-2.5 border-r" style={{ background:"rgba(2,132,199,0.08)", borderColor:"var(--c-border)" }} />
+              <div className="chain-col-oi px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase" style={{...MONO, background:"rgba(2,132,199,0.08)"}}>
                 <span className="text-[#0284c7]/50">CE </span>OI
               </div>
-              <div className="px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff] border-r border-[#cbd5e1]" style={MONO}>
+              <div className="px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase border-r" style={{...MONO, background:"rgba(2,132,199,0.08)", borderColor:"var(--c-border)"}}>
                 <span className="text-[#0284c7]/50">CE </span>LTP
               </div>
-              <div className="px-2 py-2.5 text-center text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase bg-[#e8eef5] border-x border-[#cbd5e1]" style={MONO}>
+              <div className="px-2 py-2.5 text-center text-[8px] font-bold tracking-[1.5px] uppercase border-x" style={{...MONO, color:"var(--c-text3)", background:"var(--c-muted)", borderColor:"var(--c-border)"}}>
                 STRIKE
               </div>
-              <div className="px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3] border-l border-[#cbd5e1]" style={MONO}>
+              <div className="px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase border-l" style={{...MONO, background:"rgba(225,29,72,0.08)", borderColor:"var(--c-border)"}}>
                 <span className="text-[#e11d48]/50">PE </span>LTP
               </div>
-              <div className="chain-col-oi px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3]" style={MONO}>
+              <div className="chain-col-oi px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase" style={{...MONO, background:"rgba(225,29,72,0.08)"}}>
                 <span className="text-[#e11d48]/50">PE </span>OI
               </div>
-              <div className="py-2.5 bg-[#fff0f3] border-l border-[#cbd5e1]" />
+              <div className="py-2.5 border-l" style={{ background:"rgba(225,29,72,0.08)", borderColor:"var(--c-border)" }} />
             </div>
             <div className="flex-1 overflow-y-auto">
               {filteredRows.map(row => <ChainRow key={row.strike} row={row} atmStrike={atmStrike} onAddWatch={addToWatch} addedTokens={watchlistTokens} expiry={expiry} onOpenChart={(_token, strike, type, _sym) => { window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, strike, type)}`, "_blank"); }} />)}
             </div>
-            <div className="flex-shrink-0 grid grid-cols-4 border-t border-[#cbd5e1]" style={{ gap:"1px", background:"#cbd5e1" }}>
+            <div className="flex-shrink-0 grid grid-cols-4 border-t" style={{ gap:"1px", background:"var(--c-border)", borderColor:"var(--c-border)" }}>
               {[
                 { label:"TOTAL CE OI", val:fmtOI(totalCEOI), color:"#0284c7" },
                 { label:"TOTAL PE OI", val:fmtOI(totalPEOI), color:"#e11d48" },
                 { label:"PCR VOL",     val:pcrVol.toFixed(3), color:pcrVol>=1.2?"#16a34a":pcrVol<=0.8?"#e11d48":"#b45309" },
                 { label:"PCR OI",      val:pcrOI.toFixed(3),  color:pcrOI>=1.2?"#16a34a":pcrOI<=0.8?"#e11d48":"#b45309" },
               ].map(({label,val,color})=>(
-                <div key={label} className="bg-white px-4 py-2.5">
-                  <div className="text-[8px] tracking-[1.5px] text-[#64748b] uppercase mb-1" style={MONO}>{label}</div>
+                <div key={label} className="px-4 py-2.5" style={{ background:"var(--c-card)" }}>
+                  <div className="text-[8px] tracking-[1.5px] uppercase mb-1" style={{...MONO, color:"var(--c-text3)"}}>{label}</div>
                   <div className="text-[14px] font-bold" style={{...MONO,color}}>{val}</div>
                 </div>
               ))}
@@ -561,8 +605,8 @@ function OptionsPageInner() {
           <div className="h-full overflow-y-auto px-4 py-4">
             {watchlist.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
-                <div className="text-[40px] text-[#cbd5e1]">◈</div>
-                <p className="text-[11px] text-[#64748b] text-center" style={MONO}>
+                <div className="text-[40px]" style={{ color:"var(--c-border)" }}>◈</div>
+                <p className="text-[11px] text-center" style={{...MONO, color:"var(--c-text3)"}}>
                   Watchlist empty · Use + button on chain or scanner
                 </p>
               </div>
@@ -617,7 +661,7 @@ export default function OptionsPage() {
 function StatBadge({ label, val, color, big }: { label:string; val:string; color:string; big?:boolean }) {
   return (
     <div className="flex items-baseline gap-1.5">
-      <span className="text-[9px] tracking-[2px] text-[#64748b]" style={MONO}>{label}</span>
+      <span className="text-[9px] tracking-[2px]" style={{...MONO, color:"var(--c-text3)"}}>{label}</span>
       <span className={`font-bold ${big?"text-[20px]":"text-[14px]"}`} style={{ ...MONO, color }}>{val}</span>
     </div>
   );
@@ -666,14 +710,14 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
   onOpenChart:(token:number, strike:number, type:"CE"|"PE", sym:string)=>void;
 }) {
   const { ce, pe, strike, isATM } = row;
-  const rowBg = isATM ? "bg-[#eff6ff]" : "bg-white hover:bg-[#f8fafc]";
   const ceAdded = addedTokens.has(ce.token);
   const peAdded = addedTokens.has(pe.token);
+  const rowBg = isATM ? "rgba(59,130,246,0.10)" : "var(--c-card)";
   return (
-    <div className={`chain-grid border-b border-[#f1f5f9] transition-colors ${rowBg}`}>
+    <div className="chain-grid border-b transition-colors" style={{ borderColor:"var(--c-bord2)", background:rowBg }}>
 
       {/* + CE */}
-      <div className="flex items-center justify-center bg-[#f8fbff]">
+      <div className="flex items-center justify-center" style={{ background:"rgba(2,132,199,0.06)" }}>
         <button onClick={() => onAddWatch(ce)} title={ceAdded ? `Remove CE ${strike}` : `Add CE ${strike} to watchlist`}
           className={`w-6 h-6 rounded text-[11px] font-bold border cursor-pointer transition-all
             ${ceAdded?"bg-[#16a34a] border-[#16a34a] text-white":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30 hover:bg-[#0284c7]/25"}`}>
@@ -682,13 +726,13 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
       </div>
 
       {/* CE OI — bar from right toward strike — md+ only */}
-      <div className="chain-col-oi px-3 py-2 text-right relative overflow-hidden bg-[#f8fbff]">
-        <div className="absolute right-0 top-0 bottom-0" style={{ width:`${row.ceOIBar}%`, background:"rgba(2,132,199,0.10)" }} />
-        <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(ce.oi)}</span>
+      <div className="chain-col-oi px-3 py-2 text-right relative overflow-hidden" style={{ background:"rgba(2,132,199,0.05)" }}>
+        <div className="absolute right-0 top-0 bottom-0" style={{ width:`${row.ceOIBar}%`, background:"rgba(2,132,199,0.12)" }} />
+        <span className="text-[11px] tabular-nums relative z-10" style={{...MONO, color:"var(--c-text2)"}}>{fmtOI(ce.oi)}</span>
       </div>
 
       {/* CE LTP + chart icon */}
-      <div className="px-2 py-2 text-right border-r border-[#e2e8f0] group">
+      <div className="px-2 py-2 text-right border-r group" style={{ borderColor:"var(--c-bord2)" }}>
         <div className="flex items-center justify-end gap-1.5">
           <button onClick={() => onOpenChart(ce.token, strike, "CE", tvSymbol(expiry, strike, "CE"))}
             title={`Chart ${strike} CE`}
@@ -697,7 +741,7 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
           </button>
           <div>
             <div className={`text-[13px] font-bold tabular-nums leading-tight
-              ${ce.ltp>=200&&ce.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
+              ${ce.ltp>=200&&ce.ltp<=300?"text-[#16a34a]":""}`} style={{...MONO, color:ce.ltp>=200&&ce.ltp<=300?undefined:"var(--c-text)"}}>
               ₹{ce.ltp.toFixed(2)}
             </div>
             <div className={`text-[8px] ${ce.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
@@ -708,19 +752,19 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
       </div>
 
       {/* STRIKE */}
-      <div className={`py-2 text-center border-x border-[#e2e8f0] flex flex-col items-center justify-center
-        ${isATM ? "bg-[#dbeafe]" : "bg-[#f8fafc]"}`}>
-        <div className={`text-[12px] font-bold tabular-nums leading-none
-          ${isATM ? "text-[#0284c7]" : "text-[#1e293b]"}`} style={MONO}>{strike}</div>
+      <div className="py-2 text-center border-x flex flex-col items-center justify-center"
+        style={{ borderColor:"var(--c-bord2)", background: isATM ? "rgba(59,130,246,0.15)" : "var(--c-muted)" }}>
+        <div className="text-[12px] font-bold tabular-nums leading-none"
+          style={{...MONO, color: isATM ? "#0284c7" : "var(--c-text)"}}>{strike}</div>
         {isATM && <div className="text-[6px] text-[#0284c7]/60 tracking-[1px] mt-0.5 font-bold" style={MONO}>ATM</div>}
       </div>
 
       {/* PE LTP + chart icon */}
-      <div className="px-2 py-2 text-left border-l border-[#e2e8f0] group">
+      <div className="px-2 py-2 text-left border-l group" style={{ borderColor:"var(--c-bord2)" }}>
         <div className="flex items-center gap-1.5">
           <div>
             <div className={`text-[13px] font-bold tabular-nums leading-tight
-              ${pe.ltp>=200&&pe.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
+              ${pe.ltp>=200&&pe.ltp<=300?"text-[#16a34a]":""}`} style={{...MONO, color:pe.ltp>=200&&pe.ltp<=300?undefined:"var(--c-text)"}}>
               ₹{pe.ltp.toFixed(2)}
             </div>
             <div className={`text-[8px] ${pe.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
@@ -736,13 +780,13 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
       </div>
 
       {/* PE OI — bar from left toward strike — md+ only */}
-      <div className="chain-col-oi px-3 py-2 text-left relative overflow-hidden bg-[#fff8fa]">
-        <div className="absolute left-0 top-0 bottom-0" style={{ width:`${row.peOIBar}%`, background:"rgba(225,29,72,0.08)" }} />
-        <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(pe.oi)}</span>
+      <div className="chain-col-oi px-3 py-2 text-left relative overflow-hidden" style={{ background:"rgba(225,29,72,0.05)" }}>
+        <div className="absolute left-0 top-0 bottom-0" style={{ width:`${row.peOIBar}%`, background:"rgba(225,29,72,0.10)" }} />
+        <span className="text-[11px] tabular-nums relative z-10" style={{...MONO, color:"var(--c-text2)"}}>{fmtOI(pe.oi)}</span>
       </div>
 
       {/* + PE */}
-      <div className="flex items-center justify-center bg-[#fff8fa]">
+      <div className="flex items-center justify-center" style={{ background:"rgba(225,29,72,0.05)" }}>
         <button onClick={() => onAddWatch(pe)} title={peAdded ? `Remove PE ${strike}` : `Add PE ${strike} to watchlist`}
           className={`w-6 h-6 rounded text-[11px] font-bold border cursor-pointer transition-all
             ${peAdded?"bg-[#16a34a] border-[#16a34a] text-white":"bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30 hover:bg-[#e11d48]/25"}`}>
@@ -1109,26 +1153,26 @@ function KiteChartPanel({ target }: {
     return (
       <button title={title} onClick={() => setDraw(mode)}
         className="w-7 h-7 flex items-center justify-center rounded cursor-pointer transition-colors"
-        style={{ background: active ? "#0284c7" : "transparent", color: active ? "#fff" : "#64748b" }}>
+        style={{ background: active ? "#0284c7" : "transparent", color: active ? "#fff" : "var(--c-text3)" }}>
         {children}
       </button>
     );
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col bg-white">
+    <div className="absolute inset-0 flex flex-col" style={{ background:"var(--c-card)" }}>
       {/* ── Top toolbar: intervals + indicators + OHLC ── */}
-      <div className="flex-shrink-0 flex items-center flex-wrap gap-2 px-3 py-1.5 border-b border-[#e2e8f0] bg-[#f8fafc]">
+      <div className="flex-shrink-0 flex items-center flex-wrap gap-2 px-3 py-1.5 border-b" style={{ background:"var(--c-muted)", borderColor:"var(--c-bord2)" }}>
         {/* Interval selector */}
-        <div className="flex rounded-sm overflow-hidden border border-[#cbd5e1]">
+        <div className="flex rounded-sm overflow-hidden border" style={{ borderColor:"var(--c-border)" }}>
           {IV_LIST.map(({ label, iv }) => (
             <button key={iv} onClick={() => setTf(iv as IvKey)}
-              className={`px-2.5 py-1 text-[9px] cursor-pointer transition-colors ${tf === iv ? "bg-[#0284c7] text-white font-bold" : "text-[#64748b] hover:bg-[#f1f5f9]"}`}
-              style={MONO}>{label}</button>
+              className={`px-2.5 py-1 text-[9px] cursor-pointer transition-colors ${tf === iv ? "bg-[#0284c7] text-white font-bold" : ""}`}
+              style={tf !== iv ? {...MONO, color:"var(--c-text3)"} : MONO}>{label}</button>
           ))}
         </div>
 
-        <div className="w-px h-3.5 bg-[#e2e8f0]" />
+        <div className="w-px h-3.5" style={{ background:"var(--c-bord2)" }} />
 
         {/* Indicator toggles */}
         {(["EMA9","EMA21","BB","VOL","RSI","MACD"] as IndKey[]).map(ind => (
@@ -1165,7 +1209,7 @@ function KiteChartPanel({ target }: {
       {/* ── Main area: left drawing panel + chart ── */}
       <div className="flex-1 flex min-h-0">
         {/* Left drawing tools panel */}
-        <div className="flex-shrink-0 w-8 flex flex-col items-center pt-2 pb-2 gap-0.5 border-r border-[#e2e8f0] bg-[#f8fafc]">
+        <div className="flex-shrink-0 w-8 flex flex-col items-center pt-2 pb-2 gap-0.5 border-r" style={{ background:"var(--c-muted)", borderColor:"var(--c-bord2)" }}>
           {/* Cursor */}
           <DrawBtn mode="cursor" title="Cursor (select)">
             <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
@@ -1515,14 +1559,14 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
     <div className="h-full flex flex-col overflow-hidden">
 
       {/* ── Mode switcher + action bar ── */}
-      <div className="flex items-center gap-3 px-5 py-2.5 bg-white border-b border-[#cbd5e1] flex-shrink-0">
+      <div className="flex items-center gap-3 px-5 py-2.5 border-b flex-shrink-0" style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
 
         {/* LIVE / BACKTEST toggle */}
-        <div className="flex border border-[#cbd5e1] rounded-sm overflow-hidden">
+        <div className="flex rounded-sm overflow-hidden border" style={{ borderColor:"var(--c-border)" }}>
           {(["live","backtest"] as const).map(m => (
             <button key={m} onClick={() => setMode(m)}
-              className={`px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors ${mode===m?"text-white":"text-[#64748b] hover:bg-[#f1f5f9]"}`}
-              style={{...MONO, background:mode===m?(m==="live"?"#7c3aed":"#ea580c"):"transparent"}}>
+              className={`px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors ${mode===m?"text-white":""}`}
+              style={{...MONO, background:mode===m?(m==="live"?"#7c3aed":"#ea580c"):"transparent", color:mode!==m?"var(--c-text3)":undefined}}>
               {m === "live" ? "▶ LIVE" : "◉ BACKTEST"}
             </button>
           ))}
@@ -1537,9 +1581,9 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                 <span className="text-[9px] font-bold text-[#7c3aed]" style={MONO}>SCANNING LIVE</span>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#f1f5f9] border border-[#cbd5e1] rounded-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#94a3b8]" />
-                <span className="text-[9px] text-[#64748b]" style={MONO}>{authenticated ? "MARKET CLOSED" : "NOT AUTHENTICATED"}</span>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-sm border" style={{ background:"var(--c-muted)", borderColor:"var(--c-border)" }}>
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background:"var(--c-text4)" }} />
+                <span className="text-[9px]" style={{...MONO, color:"var(--c-text3)"}}>{authenticated ? "MARKET CLOSED" : "NOT AUTHENTICATED"}</span>
               </div>
             )}
             {wr !== null && (
@@ -1550,7 +1594,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                 </span>
               </div>
             )}
-            <div className="text-[9px] text-[#64748b]" style={MONO}>
+            <div className="text-[9px]" style={{...MONO, color:"var(--c-text3)"}}>
               <span className="text-[#0284c7] font-bold">{active}</span> active · {alerts.length} total
               {smcStatus?.lastScanAt && ` · last ${new Date(smcStatus.lastScanAt).toLocaleTimeString("en-IN",{hour12:false})}`}
             </div>
@@ -1575,7 +1619,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
               </button>
               {alerts.length > 0 && (
                 <button onClick={onClear}
-                  className="px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8]" style={MONO}>
+                  className="px-3 py-1.5 text-[9px] rounded-sm cursor-pointer border" style={{...MONO, color:"var(--c-text4)", borderColor:"var(--c-border)"}}>
                   CLEAR
                 </button>
               )}
@@ -1589,7 +1633,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
               <input type="date" value={histDate}
                 max={(() => { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; })()}
                 onChange={e => onHistDateChange(e.target.value)}
-                className="border border-[#cbd5e1] rounded-sm px-2 py-1 text-[11px] bg-white cursor-pointer outline-none" style={MONO} />
+                className="rounded-sm px-2 py-1 text-[11px] cursor-pointer outline-none border" style={{...MONO, background:"var(--c-card)", borderColor:"var(--c-border)", color:"var(--c-text)"}} />
               <button onClick={onHistScan} disabled={histBusy || !authenticated || isDemoMode || !expiry}
                 className="px-3 py-1.5 text-[9px] font-bold tracking-[1px] rounded-sm border cursor-pointer disabled:opacity-40 transition-colors"
                 style={{...MONO, background:"#ea580c18", borderColor:"#ea580c", color:"#ea580c"}}>
@@ -1606,12 +1650,12 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
               </div>
             )}
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-[8px] text-[#94a3b8]" style={MONO}>
+              <span className="text-[8px]" style={{...MONO, color:"var(--c-text4)"}}>
                 Expiry: {expiry} · min 2 SMC concepts · 09:21–15:30
               </span>
               {histResults !== null && (
                 <button onClick={onHistClear}
-                  className="px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8]" style={MONO}>
+                  className="px-3 py-1.5 text-[9px] rounded-sm cursor-pointer border" style={{...MONO, color:"var(--c-text4)", borderColor:"var(--c-border)"}}>
                   CLEAR
                 </button>
               )}
@@ -1622,22 +1666,22 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
 
       {/* ── Auto Trade Positions Panel ── */}
       {autoPositions.length > 0 && (
-        <div className="flex-shrink-0 px-5 py-2 bg-[#f0fdf4] border-b border-[#bbf7d0]">
+        <div className="flex-shrink-0 px-5 py-2 border-b" style={{ background:"rgba(22,163,74,0.08)", borderColor:"rgba(22,163,74,0.25)" }}>
           <div className="text-[8px] font-bold tracking-[1.5px] text-[#16a34a] mb-1.5" style={MONO}>
             AUTO TRADE POSITIONS ({autoPositions.length})
           </div>
           <div className="flex flex-col gap-1">
             {autoPositions.map((p: any, i: number) => (
               <div key={i} className="flex items-center gap-3 text-[9px]" style={MONO}>
-                <span className="font-bold text-[#1e293b]">{p.tradingsymbol}</span>
+                <span className="font-bold" style={{ color:"var(--c-text)" }}>{p.tradingsymbol}</span>
                 <span className="px-1.5 py-0.5 rounded-sm text-[8px] font-bold"
                   style={{
                     background: p.status?.startsWith("EXITED") || p.status === "ACTIVE" ? "#16a34a22" : p.status === "ERROR" ? "#ef444422" : "#f59e0b22",
                     color: p.status?.startsWith("EXITED") || p.status === "ACTIVE" ? "#16a34a" : p.status === "ERROR" ? "#ef4444" : "#b45309",
                   }}>{p.status}</span>
-                {p.entryOrderId && <span className="text-[#64748b]">Entry: {p.entryOrderId}</span>}
+                {p.entryOrderId && <span style={{ color:"var(--c-text3)" }}>Entry: {p.entryOrderId}</span>}
                 {p.slOrderId    && <span className="text-[#ef4444]">SL: {p.slOrderId}</span>}
-                {p.logs?.[p.logs.length-1] && <span className="text-[#94a3b8] truncate max-w-[300px]">{p.logs[p.logs.length-1]}</span>}
+                {p.logs?.[p.logs.length-1] && <span className="truncate max-w-[300px]" style={{ color:"var(--c-text4)" }}>{p.logs[p.logs.length-1]}</span>}
               </div>
             ))}
           </div>
@@ -1645,20 +1689,19 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       )}
 
       {/* ── Concept legend ── */}
-      <div className="flex items-center gap-2 px-5 py-1.5 bg-[#fafbfc] border-b border-[#e2e8f0] flex-shrink-0 flex-wrap">
-        <span className="text-[7px] text-[#94a3b8] tracking-[1px]" style={MONO}>SMC CONCEPTS:</span>
+      <div className="flex items-center gap-2 px-5 py-1.5 border-b flex-shrink-0 flex-wrap" style={{ background:"var(--c-sub)", borderColor:"var(--c-bord2)" }}>
+        <span className="text-[7px] tracking-[1px]" style={{...MONO, color:"var(--c-text4)"}}>SMC CONCEPTS:</span>
         {Object.entries(conceptColor).map(([k,c]) => (
           <span key={k} className="text-[8px] px-1.5 py-0.5 rounded-sm font-bold"
             style={{...MONO, background:`${c}18`, color:c, border:`1px solid ${c}33`}}>{k}</span>
         ))}
-        <span className="text-[7px] text-[#94a3b8] ml-2" style={MONO}>· min 2 concepts · LTP ₹200–₹300 · SL −12% · Target +24% · entry ≥ 09:21</span>
+        <span className="text-[7px] ml-2" style={{...MONO, color:"var(--c-text4)"}}>· min 2 concepts · LTP ₹200–₹300 · SL −12% · Target +24% · entry ≥ 09:21</span>
       </div>
 
       {/* ── Table header ── */}
-      <div className="grid flex-shrink-0 border-b-2 border-[#cbd5e1] bg-[#f8fafc]"
-        style={{ gridTemplateColumns: COLS }}>
+      <div className="grid flex-shrink-0 border-b-2" style={{ gridTemplateColumns: COLS, background:"var(--c-muted)", borderColor:"var(--c-border)" }}>
         {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)",""].map(h => (
-          <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase" style={MONO}>{h}</div>
+          <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase" style={{...MONO, color:"var(--c-text3)"}}>{h}</div>
         ))}
       </div>
 
@@ -1666,8 +1709,8 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       <div className="flex-1 overflow-y-auto">
         {tableAlerts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[50vh] gap-4">
-            <div className="text-[56px] text-[#e2e8f0]">◎</div>
-            <p className="text-[11px] text-[#94a3b8] text-center" style={MONO}>
+            <div className="text-[56px]" style={{ color:"var(--c-bord2)" }}>◎</div>
+            <p className="text-[11px] text-center" style={{...MONO, color:"var(--c-text4)"}}>
               {mode === "backtest"
                 ? "Select a date and click RUN BACKTEST to analyse a past day"
                 : !authenticated
@@ -1696,7 +1739,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
             const isCE       = a.direction === "CE";
             const isTimedWin  = a.status === "TIME_PROFIT";
             const isTimedExit = a.status === "TIME_EXIT";
-            const rowBg      = a.status === "TARGET" || isTimedWin ? "#f0fdf4" : a.status === "SL" || isTimedExit ? "#fff5f5" : a.status === "EOD" ? "#fefce8" : idx % 2 === 0 ? "#fff" : "#fafafa";
+            const rowBg      = a.status === "TARGET" || isTimedWin ? "rgba(22,163,74,0.08)" : a.status === "SL" || isTimedExit ? "rgba(225,29,72,0.08)" : a.status === "EOD" ? "rgba(180,83,9,0.08)" : idx % 2 === 0 ? "var(--c-card)" : "var(--c-row2)";
             const dirColor   = isCE ? "#0284c7" : "#e11d48";
             const stColor    = a.status === "TARGET" || isTimedWin ? "#16a34a" : a.status === "SL" || isTimedExit ? "#e11d48" : a.status === "EOD" ? "#b45309" : "#0284c7";
             const pnlUp      = a.currentPnL >= 0;
@@ -1710,18 +1753,18 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
             const fillPct = (t2 - sl) > 0 ? Math.min(Math.max(((ltp - sl) / (t2 - sl)) * 100, 0), 100) : 50;
 
             return (
-              <div key={a.id} className="grid border-b border-[#f1f5f9] hover:bg-[#f0f4ff] transition-colors items-center"
-                style={{ gridTemplateColumns: COLS, background: rowBg }}>
+              <div key={a.id} className="grid border-b transition-colors items-center"
+                style={{ gridTemplateColumns: COLS, background: rowBg, borderColor:"var(--c-bord2)" }}>
 
                 {/* # */}
-                <div className="px-2 py-2.5 text-[9px] text-[#94a3b8]" style={MONO}>{idx + 1}</div>
+                <div className="px-2 py-2.5 text-[9px]" style={{...MONO, color:"var(--c-text4)"}}>{idx + 1}</div>
 
                 {/* TIME */}
                 <div className="px-2 py-2.5">
-                  <div className="text-[10px] font-bold text-[#1e293b]" style={MONO}>{a.entryTime}</div>
+                  <div className="text-[10px] font-bold" style={{...MONO, color:"var(--c-text)"}}>{a.entryTime}</div>
                   {a.exitTime
-                    ? <div className="text-[8px] text-[#94a3b8]" style={MONO}>→{a.exitTime}</div>
-                    : <div className="text-[8px] text-[#94a3b8]" style={MONO}>{a.strength}</div>}
+                    ? <div className="text-[8px]" style={{...MONO, color:"var(--c-text4)"}}>→{a.exitTime}</div>
+                    : <div className="text-[8px]" style={{...MONO, color:"var(--c-text4)"}}>{a.strength}</div>}
                 </div>
 
                 {/* SIGNALS */}
@@ -1744,7 +1787,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   <div className="text-[11px] font-bold" style={{...MONO, color:dirColor}}>
                     {a.strike} {a.direction}
                   </div>
-                  <div className="text-[8px] text-[#94a3b8]" style={MONO}>spot {a.spot?.toFixed(0)}</div>
+                  <div className="text-[8px]" style={{...MONO, color:"var(--c-text4)"}}>spot {a.spot?.toFixed(0)}</div>
                 </div>
 
                 {/* ENTRY */}
@@ -1795,13 +1838,13 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   {/* T1 / T2 hit indicators */}
                   <div className="flex gap-1 mb-0.5">
                     <span className="text-[7px] px-1 py-0.5 rounded-sm font-bold" style={{...MONO,
-                      background: (a.t1Hit || a.status === "TARGET") ? "#dcfce7" : "#f1f5f9",
-                      color:      (a.t1Hit || a.status === "TARGET") ? "#15803d" : "#94a3b8"}}>
+                      background: (a.t1Hit || a.status === "TARGET") ? "rgba(22,163,74,0.15)" : "var(--c-muted)",
+                      color:      (a.t1Hit || a.status === "TARGET") ? "#15803d" : "var(--c-text4)"}}>
                       T1{(a.t1Hit || a.status === "TARGET") ? "✓" : "✗"}
                     </span>
                     <span className="text-[7px] px-1 py-0.5 rounded-sm font-bold" style={{...MONO,
-                      background: a.status === "TARGET" ? "#dcfce7" : "#f1f5f9",
-                      color:      a.status === "TARGET" ? "#15803d" : "#94a3b8"}}>
+                      background: a.status === "TARGET" ? "rgba(22,163,74,0.15)" : "var(--c-muted)",
+                      color:      a.status === "TARGET" ? "#15803d" : "var(--c-text4)"}}>
                       T2{a.status === "TARGET" ? "✓" : "✗"}
                     </span>
                   </div>
@@ -1811,7 +1854,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                       ? Math.min(((a.rr?.target1 - a.rr?.sl) / (a.rr?.target2 - a.rr?.sl)) * 100, 100)
                       : 67;
                     return (
-                      <div className="h-1.5 bg-[#e2e8f0] rounded-full overflow-hidden w-full relative">
+                      <div className="h-1.5 rounded-full overflow-hidden w-full relative" style={{ background:"var(--c-bord2)" }}>
                         <div className="h-full rounded-full transition-all"
                           style={{width:`${fillPct}%`, background:fillPct >= 67 ? "#16a34a" : fillPct >= 33 ? "#f59e0b" : "#e11d48"}} />
                         {/* T1 tick mark */}
@@ -1834,7 +1877,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                     <span className="text-[11px] font-bold tabular-nums" style={{...MONO, color:pnlColor}}>
                       {pnlUp ? "+" : ""}₹{a.currentPnL?.toFixed(2) ?? "0.00"}
                     </span>
-                    <span className="text-[7px] text-[#94a3b8]" style={MONO}>unit</span>
+                    <span className="text-[7px]" style={{...MONO, color:"var(--c-text4)"}}>unit</span>
                   </div>
                   {/* lot P&L = unit × 65 */}
                   <div className="flex items-baseline gap-1 mt-0.5">
@@ -1867,15 +1910,15 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
 
       {/* ── Footer stats ── */}
       {tableAlerts.length > 0 && (
-        <div className="flex-shrink-0 border-t border-[#cbd5e1] bg-white" style={{gap:"1px"}}>
+        <div className="flex-shrink-0 border-t" style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
           {mode === "backtest" && histResults !== null && (
-            <div className="px-5 py-1.5 bg-[#fef9ec] border-b border-[#fde68a] text-[8px] text-[#b45309]" style={MONO}>
+            <div className="px-5 py-1.5 border-b text-[8px] text-[#b45309]" style={{...MONO, background:"rgba(180,83,9,0.06)", borderColor:"rgba(180,83,9,0.2)"}}>
               ◉ BACKTEST  {histDate}  ·  expiry {expiry}  ·  all prices from historical candles  ·  EOD = position open at 15:30
             </div>
           )}
-          <div className="grid" style={{gridTemplateColumns:"repeat(7,1fr)", gap:"1px", background:"#cbd5e1"}}>
+          <div className="grid" style={{gridTemplateColumns:"repeat(7,1fr)", gap:"1px", background:"var(--c-border)"}}>
             {[
-              { label:"TOTAL SIGNALS", val:`${tableAlerts.length}`,  color:"#475569" },
+              { label:"TOTAL SIGNALS", val:`${tableAlerts.length}`,  color:"var(--c-text2)" },
               { label:"ACTIVE",        val:`${active}`,              color:"#0284c7" },
               { label:"TARGET HIT",    val:`${wins}`,                color:"#16a34a" },
               { label:"SL HIT",        val:`${losses}`,              color:"#e11d48" },
@@ -1888,10 +1931,10 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                 sub:   active > 0 ? `realized ${fmtLotPnl(realizedLotPnl)}` : undefined,
               },
             ].map(({label,val,color,sub}: any) => (
-              <div key={label} className="bg-white px-3 py-2.5">
-                <div className="text-[7px] tracking-[1.5px] text-[#64748b] uppercase mb-1" style={MONO}>{label}</div>
+              <div key={label} className="px-3 py-2.5" style={{ background:"var(--c-card)" }}>
+                <div className="text-[7px] tracking-[1.5px] uppercase mb-1" style={{...MONO, color:"var(--c-text3)"}}>{label}</div>
                 <div className="text-[15px] font-bold leading-tight" style={{...MONO, color}}>{val}</div>
-                {sub && <div className="text-[7px] text-[#94a3b8] mt-0.5" style={MONO}>{sub}</div>}
+                {sub && <div className="text-[7px] mt-0.5" style={{...MONO, color:"var(--c-text4)"}}>{sub}</div>}
               </div>
             ))}
           </div>
@@ -1942,23 +1985,23 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
 
   return (
     <div className="rounded overflow-hidden"
-      style={{ border:`1.5px solid ${borderClr}33`, borderLeft:`3px solid ${borderClr}`, background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+      style={{ border:`1.5px solid ${borderClr}33`, borderLeft:`3px solid ${borderClr}`, background:"var(--c-card)", boxShadow:"0 1px 3px rgba(0,0,0,0.08)" }}>
 
       {/* ── Header: drag handle + strike name + status + remove ── */}
       <div className="flex items-center gap-2 px-3 py-2" style={{background:bgLight}}>
-        <span className="text-[#cbd5e1] cursor-grab select-none text-base leading-none">⠿</span>
+        <span className="cursor-grab select-none text-base leading-none" style={{ color:"var(--c-border)" }}>⠿</span>
         <span className="text-[20px] font-bold flex-1" style={{...BEBAS, color:nameClr, letterSpacing:1}}>
           NIFTY {leg.strike} {leg.type}
         </span>
         <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm tracking-[1px]"
           style={{...MONO, background:`${sc}14`, color:sc, border:`1px solid ${sc}30`}}>{status}</span>
-        <span className="text-[9px] text-[#94a3b8]" style={MONO}>{watched.addedAt}</span>
+        <span className="text-[9px]" style={{...MONO, color:"var(--c-text4)"}}>{watched.addedAt}</span>
         <button onClick={onRemove}
-          className="w-5 h-5 flex items-center justify-center text-[#94a3b8] hover:text-[#e11d48] cursor-pointer text-sm">×</button>
+          className="w-5 h-5 flex items-center justify-center hover:text-[#e11d48] cursor-pointer text-sm" style={{ color:"var(--c-text4)" }}>×</button>
       </div>
 
       {/* ── Price row: current price + move% + P&L + chart icon ── */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-[#f1f5f9]">
+      <div className="flex items-center justify-between px-3 py-2 border-t" style={{ borderColor:"var(--c-bord2)" }}>
         <div className="flex items-baseline gap-2" style={MONO}>
           <span className="text-[22px] font-bold tabular-nums" style={{color:borderClr}}>₹{leg.ltp.toFixed(2)}</span>
           {leg.ltpChange != null && (
@@ -1985,22 +2028,22 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
       </div>
 
       {/* ── 3-min candle metrics: RSI | OI/Vol (2c) | Volume ── */}
-      <div className="grid grid-cols-3 divide-x divide-[#f1f5f9] border-t border-[#f1f5f9] bg-[#fafafa]">
-        <div className="px-3 py-2 text-center">
-          <div className="text-[7px] text-[#94a3b8] tracking-[1px] uppercase mb-0.5" style={MONO}>RSI 3m</div>
+      <div className="grid grid-cols-3 border-t" style={{ borderColor:"var(--c-bord2)", background:"var(--c-sub)", borderTop:"1px solid var(--c-bord2)" }}>
+        <div className="px-3 py-2 text-center border-r" style={{ borderColor:"var(--c-bord2)" }}>
+          <div className="text-[7px] tracking-[1px] uppercase mb-0.5" style={{...MONO, color:"var(--c-text4)"}}>RSI 3m</div>
           <div className="text-[13px] font-bold tabular-nums" style={{...MONO, color:rsiColor}}>
             {rsi3m !== null ? rsi3m.toFixed(1) : "—"}
           </div>
         </div>
-        <div className="px-3 py-2 text-center">
-          <div className="text-[7px] text-[#94a3b8] tracking-[1px] uppercase mb-0.5" style={MONO}>OI/VOL (2c)</div>
+        <div className="px-3 py-2 text-center border-r" style={{ borderColor:"var(--c-bord2)" }}>
+          <div className="text-[7px] tracking-[1px] uppercase mb-0.5" style={{...MONO, color:"var(--c-text4)"}}>OI/VOL (2c)</div>
           <div className="text-[13px] font-bold tabular-nums" style={{...MONO, color:oiVolColor}}>
             {oiVol3m !== null ? oiVol3m.toFixed(2) : "—"}
           </div>
         </div>
         <div className="px-3 py-2 text-center">
-          <div className="text-[7px] text-[#94a3b8] tracking-[1px] uppercase mb-0.5" style={MONO}>VOLUME 3m</div>
-          <div className="text-[13px] font-bold text-[#475569] tabular-nums" style={MONO}>
+          <div className="text-[7px] tracking-[1px] uppercase mb-0.5" style={{...MONO, color:"var(--c-text4)"}}>VOLUME 3m</div>
+          <div className="text-[13px] font-bold tabular-nums" style={{...MONO, color:"var(--c-text2)"}}>
             {vol3m !== null ? fmtOI(vol3m) : "—"}
           </div>
         </div>
@@ -2014,9 +2057,9 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
         const isTimedExit= status === "TIME_EXIT";
         const isActive   = status === "ACTIVE" || status === "EXPIRED";
 
-        const bg  = isTarget || isTimedWin ? "#f0fdf4" : isSL || isTimedExit ? "#fef2f2" : "#f8fafc";
-        const bdr = isTarget || isTimedWin ? "#bbf7d0" : isSL || isTimedExit ? "#fecaca"  : "#e2e8f0";
-        const clr = isTarget || isTimedWin ? "#15803d" : isSL || isTimedExit ? "#be123c"  : "#475569";
+        const bg  = isTarget || isTimedWin ? "rgba(22,163,74,0.10)" : isSL || isTimedExit ? "rgba(225,29,72,0.10)" : "var(--c-sub)";
+        const bdr = isTarget || isTimedWin ? "rgba(22,163,74,0.30)" : isSL || isTimedExit ? "rgba(225,29,72,0.25)"  : "var(--c-bord2)";
+        const clr = isTarget || isTimedWin ? "#15803d" : isSL || isTimedExit ? "#be123c"  : "var(--c-text2)";
         const icon  = isTarget ? "🎯" : isSL ? "🛑" : isTimedWin || isTimedExit ? "⏱" : "⏳";
         const label = isTarget    ? "TARGET HIT — PREDICTION CORRECT"
           : isSL                  ? "STOP LOSS HIT — PREDICTION WRONG"
@@ -2041,7 +2084,7 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
                 <span className="text-base leading-none">{icon}</span>
                 <div>
                   <div className="text-[8px] font-bold tracking-[1px]" style={{...MONO, color:clr}}>{label}</div>
-                  <div className="text-[9px] text-[#64748b]" style={MONO}>
+                  <div className="text-[9px]" style={{...MONO, color:"var(--c-text3)"}}>
                     Entry ₹{entryPrice.toFixed(2)}
                     {!isActive && ` · Exit ₹${leg.ltp.toFixed(2)}`}
                   </div>
@@ -2065,16 +2108,15 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
               const barClr  = fillPct >= 50 ? "#16a34a" : "#e11d48";
               return (
                 <div className="px-3 pb-2">
-                  <div className="flex justify-between text-[7px] text-[#94a3b8] mb-1" style={MONO}>
+                  <div className="flex justify-between text-[7px] mb-1" style={{...MONO, color:"var(--c-text4)"}}>
                     <span>SL ₹{sl.toFixed(0)}</span>
                     <span>T ₹{t2.toFixed(0)}</span>
                   </div>
-                  <div className="h-2 bg-[#e2e8f0] rounded-full overflow-hidden relative">
+                  <div className="h-2 rounded-full overflow-hidden relative" style={{ background:"var(--c-bord2)" }}>
                     <div className="h-full rounded-full transition-all duration-500"
                       style={{width:`${fillPct}%`, background:barClr}} />
                     {/* current marker line */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-[#1e293b]"
-                      style={{left:`${fillPct}%`, transform:"translateX(-50%)"}} />
+                    <div className="absolute top-0 bottom-0 w-0.5" style={{ background:"var(--c-text)", left:`${fillPct}%`, transform:"translateX(-50%)" }} />
                   </div>
                   <div className="text-center text-[8px] mt-0.5 font-bold" style={{...MONO, color:barClr}}>
                     {fillPct.toFixed(0)}% to target
@@ -2208,14 +2250,14 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
   // Small time-corner cell (appears on both far sides of every row)
   function TimeCorner({ side }: { side: "CE"|"PE" }) {
     return (
-      <div className={`flex flex-col items-center justify-center py-2 gap-0.5
-        ${side === "CE" ? "bg-[#f0f7ff]" : "bg-[#fff0f3]"}`}>
+      <div className="flex flex-col items-center justify-center py-2 gap-0.5"
+        style={{ background: side === "CE" ? "rgba(2,132,199,0.08)" : "rgba(225,29,72,0.08)" }}>
         <div className="text-[7px] font-bold tracking-[0.5px]"
           style={{...MONO, color: side==="CE" ? "#0284c7" : "#e11d48"}}>
           {side}
         </div>
-        <div className="text-[8px] font-bold text-[#64748b]" style={MONO}>9:15</div>
-        <div className="text-[6px] text-[#94a3b8]" style={MONO}>AM</div>
+        <div className="text-[8px] font-bold" style={{...MONO, color:"var(--c-text3)"}}>9:15</div>
+        <div className="text-[6px]" style={{...MONO, color:"var(--c-text4)"}}>AM</div>
       </div>
     );
   }
@@ -2225,8 +2267,8 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
       <div className="w-full max-w-[680px] space-y-4">
 
         {/* ── Header: title + 9:15 AM ──── 3:30 PM ── */}
-        <div className="bg-white border border-[#cbd5e1] rounded-md shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-[#cbd5e1]" style={{background:"rgba(2,132,199,0.04)"}}>
+        <div className="rounded-md shadow-sm overflow-hidden border" style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
+          <div className="px-5 py-3 border-b" style={{background:"rgba(2,132,199,0.05)", borderColor:"var(--c-border)"}}>
             <div className="flex items-center justify-between">
               {/* Left corner: 9:15 AM */}
               <div className="flex items-center gap-2">
@@ -2234,20 +2276,20 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                   <div className="text-[7px] text-[#16a34a]/70 tracking-[1px] uppercase leading-none mb-0.5" style={MONO}>OPEN</div>
                   <div className="text-[14px] font-bold text-[#16a34a] leading-none" style={MONO}>9:15 AM</div>
                 </div>
-                <div className="text-[#cbd5e1]" style={MONO}>────</div>
+                <div style={{...MONO, color:"var(--c-border)"}}>────</div>
               </div>
 
               {/* Center: title */}
               <div className="text-center">
                 <div className="text-[15px] tracking-[2px] text-[#0284c7]" style={BEBAS}>OHLC CSV DOWNLOAD</div>
-                <div className="text-[8px] text-[#64748b]" style={MONO}>
+                <div className="text-[8px]" style={{...MONO, color:"var(--c-text3)"}}>
                   {histData ? `Spot ₹${histData.spot} · ATM ${histData.atm} · ${displayRows.length} strikes` : `${displayRows.length} strikes`} · OHLCV + OI + RSI(14)
                 </div>
               </div>
 
               {/* Right corner: 3:30 PM */}
               <div className="flex items-center gap-2">
-                <div className="text-[#cbd5e1]" style={MONO}>────</div>
+                <div style={{...MONO, color:"var(--c-border)"}}>────</div>
                 <div className="px-2.5 py-1.5 rounded bg-[#e11d48]/10 border border-[#e11d48]/30">
                   <div className="text-[7px] text-[#e11d48]/70 tracking-[1px] uppercase leading-none mb-0.5" style={MONO}>CLOSE</div>
                   <div className="text-[14px] font-bold text-[#e11d48] leading-none" style={MONO}>3:30 PM</div>
@@ -2258,11 +2300,11 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
 
           {/* Date dropdown */}
           <div className="px-5 py-3">
-            <div className="text-[8px] text-[#64748b] tracking-[1.5px] uppercase mb-2" style={MONO}>
+            <div className="text-[8px] tracking-[1.5px] uppercase mb-2" style={{...MONO, color:"var(--c-text3)"}}>
               Select Date — Last 30 Trading Days
             </div>
             <Select value={ohlcDate} onValueChange={setOhlcDate}>
-              <SelectTrigger className="w-full border-[#cbd5e1] bg-[#f8fafc] text-[11px] h-9" style={MONO}>
+              <SelectTrigger className="w-full text-[11px] h-9 border" style={{...MONO, background:"var(--c-muted)", borderColor:"var(--c-border)", color:"var(--c-text)"}}>
                 <SelectValue placeholder="Select date" />
               </SelectTrigger>
               <SelectContent className="max-h-72">
@@ -2278,16 +2320,16 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
 
         {/* ── Top opening price banner: selected day's best CE + PE ── */}
         {hasPrices && (
-          <div className="bg-white border border-[#cbd5e1] rounded-md shadow-sm overflow-hidden">
-            <div className="px-4 py-2 border-b border-[#cbd5e1] bg-[#f8fafc]">
-              <div className="text-[8px] font-bold tracking-[1.5px] text-[#475569] uppercase" style={MONO}>
+          <div className="rounded-md shadow-sm overflow-hidden border" style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
+            <div className="px-4 py-2 border-b" style={{ background:"var(--c-muted)", borderColor:"var(--c-border)" }}>
+              <div className="text-[8px] font-bold tracking-[1.5px] uppercase" style={{...MONO, color:"var(--c-text2)"}}>
                 ★ TOP OPENING PRICE · {fmtTradingDay(ohlcDate)} · ₹200–₹300 SCAN RANGE
               </div>
             </div>
             <div className="grid grid-cols-[1fr_auto_1fr]">
               {/* CE best */}
               <div className={`px-5 py-3 ${bestCERow ? "" : "opacity-40"}`}>
-                <div className="text-[8px] text-[#94a3b8] tracking-[1px] uppercase mb-1" style={MONO}>
+                <div className="text-[8px] tracking-[1px] uppercase mb-1" style={{...MONO, color:"var(--c-text4)"}}>
                   CE · Best Opening
                 </div>
                 {bestCERow ? (
@@ -2304,16 +2346,16 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                     </div>
                   </>
                 ) : (
-                  <div className="text-[9px] text-[#94a3b8]" style={MONO}>No CE in ₹200–₹300 range</div>
+                  <div className="text-[9px]" style={{...MONO, color:"var(--c-text4)"}}>No CE in ₹200–₹300 range</div>
                 )}
               </div>
 
               {/* Divider */}
-              <div className="w-px bg-[#f1f5f9] my-2" />
+              <div className="w-px my-2" style={{ background:"var(--c-bord2)" }} />
 
               {/* PE best */}
               <div className={`px-5 py-3 text-right ${bestPERow ? "" : "opacity-40"}`}>
-                <div className="text-[8px] text-[#94a3b8] tracking-[1px] uppercase mb-1" style={MONO}>
+                <div className="text-[8px] tracking-[1px] uppercase mb-1" style={{...MONO, color:"var(--c-text4)"}}>
                   PE · Best Opening
                 </div>
                 {bestPERow ? (
@@ -2326,11 +2368,11 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                       <span className="text-[15px] font-bold text-[#16a34a]" style={MONO}>
                         ₹{bestPERow.pe.open}
                       </span>
-                      <span className="text-[9px] text-[#64748b]" style={MONO}>9:15 AM</span>
+                      <span className="text-[9px]" style={{...MONO, color:"var(--c-text3)"}}>9:15 AM</span>
                     </div>
                   </>
                 ) : (
-                  <div className="text-[9px] text-[#94a3b8]" style={MONO}>No PE in ₹200–₹300 range</div>
+                  <div className="text-[9px]" style={{...MONO, color:"var(--c-text4)"}}>No PE in ₹200–₹300 range</div>
                 )}
               </div>
             </div>
@@ -2338,37 +2380,37 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
         )}
 
         {/* ── Strike table: TIME | CE | STRIKE | PE | TIME ── */}
-        <div className="bg-white border border-[#cbd5e1] rounded-md shadow-sm overflow-hidden">
+        <div className="rounded-md shadow-sm overflow-hidden border" style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
 
           {/* Table header */}
-          <div className="grid border-b border-[#cbd5e1] bg-[#f1f5f9]" style={{gridTemplateColumns: GRID}}>
-            <div className="py-2 text-center text-[7px] font-bold tracking-[1px] text-[#0284c7] uppercase bg-[#e8f4ff] border-r border-[#cbd5e1]" style={MONO}>
+          <div className="grid border-b" style={{gridTemplateColumns: GRID, background:"var(--c-muted)", borderColor:"var(--c-border)"}}>
+            <div className="py-2 text-center text-[7px] font-bold tracking-[1px] text-[#0284c7] uppercase border-r" style={{...MONO, background:"rgba(2,132,199,0.08)", borderColor:"var(--c-border)"}}>
               TIME
             </div>
             <div className="px-3 py-2 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase" style={MONO}>
               CE · 9:15 AM OPENING
             </div>
-            <div className="py-2 text-center text-[8px] tracking-[1.5px] text-[#64748b] uppercase border-x border-[#cbd5e1] bg-[#e8eef5]" style={MONO}>
+            <div className="py-2 text-center text-[8px] tracking-[1.5px] uppercase border-x" style={{...MONO, color:"var(--c-text3)", background:"var(--c-muted)", borderColor:"var(--c-border)"}}>
               STRIKE
             </div>
             <div className="px-3 py-2 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase" style={MONO}>
               PE · 9:15 AM OPENING
             </div>
-            <div className="py-2 text-center text-[7px] font-bold tracking-[1px] text-[#e11d48] uppercase bg-[#fff0f3] border-l border-[#cbd5e1]" style={MONO}>
+            <div className="py-2 text-center text-[7px] font-bold tracking-[1px] text-[#e11d48] uppercase border-l" style={{...MONO, background:"rgba(225,29,72,0.08)", borderColor:"var(--c-border)"}}>
               TIME
             </div>
           </div>
 
           {/* Loading state */}
           {loadingHist && (
-            <div className="flex items-center justify-center gap-2 py-6 border-b border-[#f1f5f9]">
+            <div className="flex items-center justify-center gap-2 py-6 border-b" style={{ borderColor:"var(--c-bord2)" }}>
               <div className="w-4 h-4 border-2 border-[#0284c7]/20 border-t-[#0284c7] rounded-full animate-spin" />
-              <span className="text-[9px] text-[#94a3b8]" style={MONO}>Loading {fmtTradingDay(ohlcDate)} historical strikes…</span>
+              <span className="text-[9px]" style={{...MONO, color:"var(--c-text4)"}}>Loading {fmtTradingDay(ohlcDate)} historical strikes…</span>
             </div>
           )}
 
           {/* Strike rows */}
-          <div className="max-h-[400px] overflow-y-auto divide-y divide-[#f8fafc]">
+          <div className="max-h-[400px] overflow-y-auto divide-y" style={{ borderColor:"var(--c-bord2)" }}>
             {displayRows.map(r => {
               const ceP      = r.ce.open;
               const peP      = r.pe.open;
@@ -2378,11 +2420,10 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
               const peSel    = ohlcPE?.token === r.pe.token;
               const isBestCE = bestCERow?.strike === r.strike;
               const isBestPE = bestPERow?.strike === r.strike;
-              const rowBg    = r.isATM ? "bg-[#eff6ff]" : "bg-white";
 
               return (
-                <div key={r.strike} className={`grid ${rowBg} transition-colors`}
-                  style={{gridTemplateColumns: GRID}}>
+                <div key={r.strike} className="grid transition-colors"
+                  style={{gridTemplateColumns: GRID, background: r.isATM ? "rgba(59,130,246,0.10)" : "var(--c-card)"}}>
 
                   {/* Left TIME corner */}
                   <TimeCorner side="CE" />
@@ -2390,14 +2431,13 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                   {/* CE price — clickable */}
                   <button
                     onClick={() => setOhlcCE(ceSel ? null : { token: r.ce.token, strike: r.strike })}
-                    className={`px-4 py-3 text-right cursor-pointer transition-colors border-r border-[#f1f5f9]
-                      ${ceSel
-                        ? "bg-[#0284c7]/10 ring-1 ring-inset ring-[#0284c7]/40"
-                        : ceOk ? "hover:bg-[#f0fdf4]" : "hover:bg-[#f8fafc]"}`}>
+                    className={`px-4 py-3 text-right cursor-pointer transition-colors border-r
+                      ${ceSel ? "ring-1 ring-inset ring-[#0284c7]/40" : ""}`}
+                    style={{ borderColor:"var(--c-bord2)", background: ceSel ? "rgba(2,132,199,0.10)" : undefined }}>
                     {ceP != null ? (
                       <div>
-                        <div className={`text-[13px] font-bold tabular-nums leading-tight
-                          ${ceSel ? "text-[#0284c7]" : ceOk ? "text-[#16a34a]" : "text-[#334155]"}`} style={MONO}>
+                        <div className="text-[13px] font-bold tabular-nums leading-tight"
+                          style={{...MONO, color: ceSel ? "#0284c7" : ceOk ? "#16a34a" : "var(--c-text)"}}>
                           {ceSel ? "✓ " : ""}₹{ceP}
                         </div>
                         <div className="text-[7px] mt-0.5 font-semibold" style={MONO}>
@@ -2405,21 +2445,21 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                             ? <span className="text-[#0284c7]">SELECTED</span>
                             : isBestCE ? <span className="text-[#16a34a]">★ BEST ₹200–₹300</span>
                             : ceOk ? <span className="text-[#16a34a]">✓ IN RANGE</span>
-                            : <span className="text-[#94a3b8]">{r.strike} CE</span>}
+                            : <span style={{ color:"var(--c-text4)" }}>{r.strike} CE</span>}
                         </div>
                       </div>
                     ) : loadingHist ? (
-                      <span className="text-[9px] text-[#e2e8f0]" style={MONO}>…</span>
+                      <span className="text-[9px]" style={{...MONO, color:"var(--c-border)"}}>…</span>
                     ) : (
-                      <span className="text-[9px] text-[#e2e8f0]" style={MONO}>—</span>
+                      <span className="text-[9px]" style={{...MONO, color:"var(--c-border)"}}>—</span>
                     )}
                   </button>
 
                   {/* Strike — center */}
-                  <div className={`py-3 text-center border-x border-[#e2e8f0] flex flex-col items-center justify-center
-                    ${r.isATM ? "bg-[#dbeafe]" : "bg-[#f8fafc]"}`}>
-                    <div className={`text-[12px] font-bold tabular-nums leading-none
-                      ${r.isATM ? "text-[#0284c7]" : "text-[#1e293b]"}`} style={MONO}>
+                  <div className="py-3 text-center border-x flex flex-col items-center justify-center"
+                    style={{ borderColor:"var(--c-bord2)", background: r.isATM ? "rgba(59,130,246,0.15)" : "var(--c-muted)" }}>
+                    <div className="text-[12px] font-bold tabular-nums leading-none"
+                      style={{...MONO, color: r.isATM ? "#0284c7" : "var(--c-text)"}}>
                       {r.strike}
                     </div>
                     {r.isATM && (
@@ -2430,14 +2470,13 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                   {/* PE price — clickable */}
                   <button
                     onClick={() => setOhlcPE(peSel ? null : { token: r.pe.token, strike: r.strike })}
-                    className={`px-4 py-3 text-left cursor-pointer transition-colors border-l border-[#f1f5f9]
-                      ${peSel
-                        ? "bg-[#e11d48]/10 ring-1 ring-inset ring-[#e11d48]/40"
-                        : peOk ? "hover:bg-[#f0fdf4]" : "hover:bg-[#f8fafc]"}`}>
+                    className={`px-4 py-3 text-left cursor-pointer transition-colors border-l
+                      ${peSel ? "ring-1 ring-inset ring-[#e11d48]/40" : ""}`}
+                    style={{ borderColor:"var(--c-bord2)", background: peSel ? "rgba(225,29,72,0.10)" : undefined }}>
                     {peP != null ? (
                       <div>
-                        <div className={`text-[13px] font-bold tabular-nums leading-tight
-                          ${peSel ? "text-[#e11d48]" : peOk ? "text-[#16a34a]" : "text-[#334155]"}`} style={MONO}>
+                        <div className="text-[13px] font-bold tabular-nums leading-tight"
+                          style={{...MONO, color: peSel ? "#e11d48" : peOk ? "#16a34a" : "var(--c-text)"}}>
                           {peSel ? "✓ " : ""}₹{peP}
                         </div>
                         <div className="text-[7px] mt-0.5 font-semibold" style={MONO}>
@@ -2445,13 +2484,13 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
                             ? <span className="text-[#e11d48]">SELECTED</span>
                             : isBestPE ? <span className="text-[#16a34a]">★ BEST ₹200–₹300</span>
                             : peOk ? <span className="text-[#16a34a]">✓ IN RANGE</span>
-                            : <span className="text-[#94a3b8]">{r.strike} PE</span>}
+                            : <span style={{ color:"var(--c-text4)" }}>{r.strike} PE</span>}
                         </div>
                       </div>
                     ) : loadingHist ? (
-                      <span className="text-[9px] text-[#e2e8f0]" style={MONO}>…</span>
+                      <span className="text-[9px]" style={{...MONO, color:"var(--c-border)"}}>…</span>
                     ) : (
-                      <span className="text-[9px] text-[#e2e8f0]" style={MONO}>—</span>
+                      <span className="text-[9px]" style={{...MONO, color:"var(--c-border)"}}>—</span>
                     )}
                   </button>
 
@@ -2462,14 +2501,14 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
             })}
           </div>
 
-          <div className="px-4 py-2 border-t border-[#f1f5f9] bg-[#fafafa] flex items-center justify-between">
-            <span className="text-[8px] text-[#94a3b8]" style={MONO}>
+          <div className="px-4 py-2 border-t flex items-center justify-between" style={{ borderColor:"var(--c-bord2)", background:"var(--c-sub)" }}>
+            <span className="text-[8px]" style={{...MONO, color:"var(--c-text4)"}}>
               {displayRows.length} strikes · Green = ₹200–₹300 · ★ = best opening price · Click to select/deselect
             </span>
             {loadingHist && (
               <div className="flex items-center gap-1">
                 <div className="w-2.5 h-2.5 border border-[#0284c7]/30 border-t-[#0284c7] rounded-full animate-spin" />
-                <span className="text-[7px] text-[#94a3b8]" style={MONO}>fetching historical prices…</span>
+                <span className="text-[7px]" style={{...MONO, color:"var(--c-text4)"}}>fetching historical prices…</span>
               </div>
             )}
           </div>
@@ -2482,12 +2521,12 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
               <div className="px-4 py-2.5 rounded-md border border-[#0284c7]/30 bg-[#0284c7]/5">
                 <div className="flex items-center gap-1.5 mb-1">
                   <span className="text-[7px] font-bold text-[#0284c7] uppercase tracking-[1px]" style={MONO}>CE FILE</span>
-                  <span className="text-[7px] text-[#94a3b8]" style={MONO}>9:15 AM → 3:30 PM</span>
+                  <span className="text-[7px]" style={{...MONO, color:"var(--c-text4)"}}>9:15 AM → 3:30 PM</span>
                 </div>
                 <div className="text-[9px] text-[#0284c7] font-bold truncate" style={MONO}>
                   {ohlcDate}_{symbol(ohlcCE.strike, "CE")}.csv
                 </div>
-                <div className="text-[8px] text-[#64748b] mt-0.5" style={MONO}>
+                <div className="text-[8px] mt-0.5" style={{...MONO, color:"var(--c-text3)"}}>
                   Open ₹{displayRows.find(r => r.ce.token === ohlcCE.token)?.ce.open ?? "—"} · Minute candles
                 </div>
               </div>
@@ -2496,12 +2535,12 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
               <div className="px-4 py-2.5 rounded-md border border-[#e11d48]/30 bg-[#e11d48]/5">
                 <div className="flex items-center gap-1.5 mb-1">
                   <span className="text-[7px] font-bold text-[#e11d48] uppercase tracking-[1px]" style={MONO}>PE FILE</span>
-                  <span className="text-[7px] text-[#94a3b8]" style={MONO}>9:15 AM → 3:30 PM</span>
+                  <span className="text-[7px]" style={{...MONO, color:"var(--c-text4)"}}>9:15 AM → 3:30 PM</span>
                 </div>
                 <div className="text-[9px] text-[#e11d48] font-bold truncate" style={MONO}>
                   {ohlcDate}_{symbol(ohlcPE.strike, "PE")}.csv
                 </div>
-                <div className="text-[8px] text-[#64748b] mt-0.5" style={MONO}>
+                <div className="text-[8px] mt-0.5" style={{...MONO, color:"var(--c-text3)"}}>
                   Open ₹{displayRows.find(r => r.pe.token === ohlcPE.token)?.pe.open ?? "—"} · Minute candles
                 </div>
               </div>
@@ -2522,7 +2561,7 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
           {busy ? "DOWNLOADING…" : "↓  DOWNLOAD CSV  (9:15 AM – 3:30 PM)"}
         </button>
 
-        <div className="text-[8px] text-[#94a3b8] text-center" style={MONO}>
+        <div className="text-[8px] text-center" style={{...MONO, color:"var(--c-text4)"}}>
           Each selected leg → 1 CSV file · Full day minute candles · OHLCV + OI + RSI(14)
         </div>
       </div>

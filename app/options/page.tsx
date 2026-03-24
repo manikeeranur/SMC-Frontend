@@ -517,8 +517,15 @@ function OptionsPageInner() {
 
       {/* ── Token row ──────────────────────────────────────────────────────── */}
       {!isDemoMode && authenticated && accessToken && (
-        <div className="flex items-center gap-2 px-3 md:px-5 py-1.5 border-b"
+        <div className="flex items-center gap-3 px-3 md:px-5 py-1.5 border-b"
           style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
+          {liveUser && (
+            <>
+              <span className="text-[8px] tracking-[1px]" style={{ ...MONO, color:"var(--c-text4)" }}>USER</span>
+              <span className="text-[9px] font-bold" style={{ ...MONO, color:"#22c55e" }}>{liveUser}</span>
+              <span style={{ color:"var(--c-border)" }}>|</span>
+            </>
+          )}
           <span className="text-[8px] tracking-[1px]" style={{ ...MONO, color:"var(--c-text4)" }}>ACCESS TOKEN</span>
           <span className="text-[9px] font-bold" style={{ ...MONO, color:"#f59e0b" }}>{accessToken}</span>
           <button

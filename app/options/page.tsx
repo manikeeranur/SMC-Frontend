@@ -164,7 +164,10 @@ function OptionsPageInner() {
   useEffect(() => {
     if (isDemoMode || !authenticated) return;
     const ws = createWS((msg) => {
-      if (msg.type === "scan_result" && msg.active) { setActiveTab("smc"); }
+      if (msg.type === "scan_result" && msg.active) {
+        setActiveTab("smc");
+        if (msg.alert) setSmcAlerts(prev => [msg.alert, ...prev].slice(0, 100));
+      }
       if (msg.type === "status") setAuthenticated(msg.authenticated);
     });
     return () => ws?.close();

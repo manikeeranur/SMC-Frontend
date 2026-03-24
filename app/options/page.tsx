@@ -508,16 +508,6 @@ function OptionsPageInner() {
             </div>
           )}
 
-          {!isDemoMode && authenticated && accessToken && (
-            <button
-              onClick={() => { navigator.clipboard.writeText(accessToken); setTokenCopied(true); setTimeout(()=>setTokenCopied(false), 2000); }}
-              className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-sm border cursor-pointer transition-colors hover:opacity-80"
-              style={{ ...MONO, borderColor:"#f59e0b40", background:"#f59e0b08", color:"#f59e0b", fontSize:9 }}
-              title={accessToken}>
-              🔑 {tokenCopied ? "COPIED!" : `${accessToken.slice(0,8)}…`}
-            </button>
-          )}
-
           {!isDemoMode && authenticated && (
             <button onClick={handleLogout}
               className="flex items-center justify-center w-8 h-8 border border-[#e11d48]/40 bg-[#e11d48]/5 text-[#e11d48] rounded-sm cursor-pointer hover:bg-[#e11d48]/15 transition-colors"
@@ -527,6 +517,21 @@ function OptionsPageInner() {
           )}
         </div>
       </header>
+
+      {/* ── Token row ──────────────────────────────────────────────────────── */}
+      {!isDemoMode && authenticated && accessToken && (
+        <div className="flex items-center gap-2 px-3 md:px-5 py-1.5 border-b"
+          style={{ background:"var(--c-card)", borderColor:"var(--c-border)" }}>
+          <span className="text-[8px] tracking-[1px]" style={{ ...MONO, color:"var(--c-text4)" }}>ACCESS TOKEN</span>
+          <span className="text-[9px] font-bold" style={{ ...MONO, color:"#f59e0b" }}>{accessToken}</span>
+          <button
+            onClick={() => { navigator.clipboard.writeText(accessToken); setTokenCopied(true); setTimeout(()=>setTokenCopied(false), 2000); }}
+            className="text-[8px] px-2 py-0.5 rounded-sm border cursor-pointer hover:opacity-80 transition-opacity"
+            style={{ ...MONO, borderColor:"#f59e0b40", background:"#f59e0b0a", color:"#f59e0b" }}>
+            {tokenCopied ? "✓ COPIED" : "COPY"}
+          </button>
+        </div>
+      )}
 
       {/* ══ TAB BAR ══ */}
       <div className="tab-scroll flex items-center gap-2 px-3 md:px-5 py-2 flex-shrink-0 border-b"

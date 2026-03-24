@@ -46,7 +46,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
       const data = await res.json();
       if (data.success) {
         setLoadMsg("Authenticated! Loading dashboard...");
-        setTimeout(() => onConnected("Manual"), 900);
+        setTimeout(() => onConnected(data.user_name || ""), 900);
       } else {
         setErr(data.error || "Invalid token");
         setLoading(false);

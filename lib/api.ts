@@ -20,7 +20,7 @@ export const authApi = {
   loginUrl:    ()       => req<{ loginUrl: string }>("/api/auth/login"),
   setToken:    (t:string) => req("/api/auth/token", { method:"POST", body:JSON.stringify({ access_token:t }) }),
   logout:      ()       => req("/api/auth/logout", { method:"POST" }),
-  tokenValue:  ()       => req<{ access_token: string }>("/api/auth/token-value"),
+  tokenValue:  ()       => req<{ access_token: string; user_name: string }>("/api/auth/token-value"),
 };
 
 export const optionsApi = {

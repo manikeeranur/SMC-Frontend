@@ -148,10 +148,13 @@ function OptionsPageInner() {
     }).catch(() => setAuthenticated(false));
   }, [kiteStatus, kiteUser]);
 
-  // ── Fetch access token for display ──────────────────────────────────────────
+  // ── Fetch access token + username from backend ───────────────────────────────
   useEffect(() => {
     if (!authenticated || isDemoMode) return;
-    authApi.tokenValue().then(d => setAccessToken(d.access_token)).catch(() => {});
+    authApi.tokenValue().then(d => {
+      setAccessToken(d.access_token);
+      if (d.user_name) { setLiveUser(d.user_name); localStorage.setItem("kite_user", d.user_name); }
+    }).catch(() => {});
   }, [authenticated]);
 
   useEffect(() => { if (isDemoMode && expiries.length && !expiry) setExpiry(expiries[0]); }, [expiries, expiry]);

@@ -688,7 +688,8 @@ function ScanTab({ dark }: { dark:boolean }) {
       if (!res.ok) { const j = await res.json(); throw new Error(j.error || "Scan failed"); }
       const data = await res.json();
       const tagged: ScanResult[] = (data.results || []).map((r: any, i: number) => ({
-        ...r, id: `${r.stock}_${r.pattern}_${r.direction}_${i}`, status:"waiting" as ScanStatus,
+        ...r, id: `${r.stock}_${r.pattern}_${r.direction}_${i}`,
+        status: (r.status || "waiting") as ScanStatus,
       }));
       setResults(tagged);
       setLastScan(new Date().toLocaleString("en-IN",{day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit"}));

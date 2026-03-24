@@ -1602,7 +1602,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   const totalLotPnl   = tableAlerts.reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
   const realizedLotPnl = tableAlerts.filter(a => a.status !== "ACTIVE").reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
 
-  const COLS = "40px 60px 1fr 80px 70px 72px 72px 72px 72px 90px 130px 80px";
+  const COLS = "40px 60px 1fr 80px 70px 72px 72px 72px 72px 90px 130px 72px 80px";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -1680,7 +1680,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
             <div className="flex items-center gap-2">
               <span className="text-[9px] text-[#64748b] tracking-[1px]" style={MONO}>DATE</span>
               <input type="date" value={histDate}
-                max={(() => { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; })()}
+                max={new Date().toISOString().split("T")[0]}
                 onChange={e => onHistDateChange(e.target.value)}
                 className="rounded-sm px-2 py-1 text-[11px] cursor-pointer outline-none border" style={{...MONO, background:"var(--c-card)", borderColor:"var(--c-border)", color:"var(--c-text)"}} />
               <button onClick={onHistScan} disabled={histBusy || !authenticated || isDemoMode || !expiry}
@@ -1749,7 +1749,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
 
       {/* ── Table header ── */}
       <div className="grid flex-shrink-0 border-b-2" style={{ gridTemplateColumns: COLS, background:"var(--c-muted)", borderColor:"var(--c-border)" }}>
-        {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)",""].map(h => (
+        {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)","MAX ▲",""].map(h => (
           <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase" style={{...MONO, color:"var(--c-text3)"}}>{h}</div>
         ))}
       </div>
@@ -1940,8 +1940,32 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   </div>
                 </div>
 
-                {/* Add to watchlist */}
-                <div className="px-2 py-2.5 flex items-center justify-center">
+                {/* MAX ▲ — peak upward move from entry */}
+                <div className="px-2 py-2.5">
+                  {a.peakMove != null ? (
+                    <div>
+                      <div className="text-[11px] font-bold tabular-nums"
+                        style={{...MONO, color: a.peakMove > 0 ? "#16a34a" : "var(--c-text4)"}}>
+                        {a.peakMove > 0 ? `+${a.peakMove.toFixed(2)}` : "0.00"}
+                      </div>
+                      <div className="text-[7px]" style={{...MONO, color:"var(--c-text4)"}}>pts</div>
+                    </div>
+                  ) : (
+                    <span className="text-[10px]" style={{...MONO, color:"var(--c-text4)"}}>—</span>
+                  )}
+                </div>
+
+                {/* Chart + Add to watchlist */}
+                <div className="px-2 py-2.5 flex items-center justify-center gap-1.5">
+                  {a.strike && a.direction && a.expiry && (
+                    <button
+                      onClick={() => window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(a.expiry, a.strike, a.direction)}`, "_blank")}
+                      title="Open chart"
+                      className="w-6 h-6 flex items-center justify-center rounded cursor-pointer hover:opacity-70 transition-opacity"
+                      style={{color: dirColor}}>
+                      <CandleIcon color={dirColor} />
+                    </button>
+                  )}
                   {a.leg && a.status === "ACTIVE" && (
                     <button onClick={() => onAddWatch(a.leg)}
                       title="Add to watchlist"

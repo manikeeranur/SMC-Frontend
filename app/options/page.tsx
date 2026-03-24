@@ -151,10 +151,7 @@ function OptionsPageInner() {
   // ── Fetch access token for display ──────────────────────────────────────────
   useEffect(() => {
     if (!authenticated || isDemoMode) return;
-    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/auth/token-value`)
-      .then(r => r.json())
-      .then(d => { if (d.access_token) setAccessToken(d.access_token); })
-      .catch(() => {});
+    authApi.tokenValue().then(d => setAccessToken(d.access_token)).catch(() => {});
   }, [authenticated]);
 
   useEffect(() => { if (isDemoMode && expiries.length && !expiry) setExpiry(expiries[0]); }, [expiries, expiry]);

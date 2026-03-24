@@ -16,10 +16,11 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 export const authApi = {
-  status:   ()       => req<{ authenticated: boolean }>("/api/auth/status"),
-  loginUrl: ()       => req<{ loginUrl: string }>("/api/auth/login"),
-  setToken: (t:string) => req("/api/auth/token", { method:"POST", body:JSON.stringify({ access_token:t }) }),
-  logout:   ()       => req("/api/auth/logout", { method:"POST" }),
+  status:      ()       => req<{ authenticated: boolean }>("/api/auth/status"),
+  loginUrl:    ()       => req<{ loginUrl: string }>("/api/auth/login"),
+  setToken:    (t:string) => req("/api/auth/token", { method:"POST", body:JSON.stringify({ access_token:t }) }),
+  logout:      ()       => req("/api/auth/logout", { method:"POST" }),
+  tokenValue:  ()       => req<{ access_token: string }>("/api/auth/token-value"),
 };
 
 export const optionsApi = {

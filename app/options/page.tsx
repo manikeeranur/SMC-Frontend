@@ -60,6 +60,8 @@ function OptionsPageInner() {
   const dragIdxRef = useRef<number|null>(null);
   const [authenticated, setAuthenticated] = useState(isDemoMode);
   const [liveUser, setLiveUser]       = useState(kiteUser);
+  const [accessToken, setAccessToken] = useState("");
+  const [tokenCopied, setTokenCopied] = useState(false);
   const [hydrated, setHydrated]       = useState(false);
   const [ohlcDate, setOhlcDate]       = useState(() => new Date().toISOString().split("T")[0]);
   const [ohlcCE,   setOhlcCE]         = useState<{token:number; strike:number} | null>(null);
@@ -145,6 +147,15 @@ function OptionsPageInner() {
       }
     }).catch(() => setAuthenticated(false));
   }, [kiteStatus, kiteUser]);
+
+  // ── Fetch access token for display ──────────────────────────────────────────
+  useEffect(() => {
+    if (!authenticated || isDemoMode) return;
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/api/auth/token-value`)
+      .then(r => r.json())
+      .then(d => { if (d.access_token) setAccessToken(d.access_token); })
+      .catch(() => {});
+  }, [authenticated]);
 
   useEffect(() => { if (isDemoMode && expiries.length && !expiry) setExpiry(expiries[0]); }, [expiries, expiry]);
 
@@ -249,9 +260,11 @@ function OptionsPageInner() {
   useEffect(() => { if (expiry && (isDemoMode || authenticated)) refresh(); }, [expiry, refresh, authenticated]);
 
   useEffect(() => {
-    const interval = isDemoMode ? 2000 : smcStatus?.marketOpen ? 1000 : 5000;
-    if (live) tickRef.current = setInterval(refresh, interval);
-    else clearInterval(tickRef.current);
+    clearInterval(tickRef.current);
+    // Market closed → no polling, initial fetch already done by the expiry effect above
+    if (!live || (!isDemoMode && smcStatus !== null && !smcStatus.marketOpen)) return;
+    const interval = isDemoMode ? 2000 : 1000; // 1s during market hours
+    tickRef.current = setInterval(refresh, interval);
     return () => clearInterval(tickRef.current);
   }, [live, refresh, smcStatus?.marketOpen]);
 
@@ -448,10 +461,12 @@ function OptionsPageInner() {
         <div className="flex items-center gap-2 md:gap-3 flex-shrink-0">
           {isDemoMode
             ? <Pill label="DEMO MODE" color="#ea580c" />
-            : <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 border border-[#16a34a]/40 bg-[#16a34a]/5 rounded-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] live-pulse" />
-                <span className="text-[9px] text-[#16a34a]" style={MONO}>LIVE{liveUser ? ` · ${liveUser}` : ""}</span>
-              </div>
+            : smcStatus !== null && !smcStatus.marketOpen
+              ? <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 border border-[#94a3b8]/30 bg-[#94a3b8]/5 rounded-sm">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#94a3b8]" />
+                  <span className="text-[9px] text-[#94a3b8]" style={MONO}>MARKET CLOSED</span>
+                </div>
+              : null
           }
 
           {loading && <span className="hidden sm:block text-[9px]" style={{ ...MONO, color:"var(--c-text3)" }}>fetching...</span>}
@@ -484,6 +499,24 @@ function OptionsPageInner() {
             title="View CSV Results">
             📊
           </a>
+
+          {!isDemoMode && authenticated && liveUser && (
+            <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-sm border"
+              style={{ ...MONO, borderColor:"#22c55e40", background:"#22c55e08", color:"#22c55e", fontSize:9 }}>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e]" />
+              {liveUser}
+            </div>
+          )}
+
+          {!isDemoMode && authenticated && accessToken && (
+            <button
+              onClick={() => { navigator.clipboard.writeText(accessToken); setTokenCopied(true); setTimeout(()=>setTokenCopied(false), 2000); }}
+              className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-sm border cursor-pointer transition-colors hover:opacity-80"
+              style={{ ...MONO, borderColor:"#f59e0b40", background:"#f59e0b08", color:"#f59e0b", fontSize:9 }}
+              title={accessToken}>
+              🔑 {tokenCopied ? "COPIED!" : `${accessToken.slice(0,8)}…`}
+            </button>
+          )}
 
           {!isDemoMode && authenticated && (
             <button onClick={handleLogout}

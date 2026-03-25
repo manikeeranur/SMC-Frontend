@@ -225,7 +225,7 @@ function OptionsPageInner() {
   useEffect(() => { if (expiry && (isDemoMode || authenticated)) refresh(); }, [expiry, refresh, authenticated]);
 
   useEffect(() => {
-    const interval = isDemoMode ? 2000 : 5000;
+    const interval = isDemoMode ? 2000 : 500;
     if (live) tickRef.current = setInterval(refresh, interval);
     else clearInterval(tickRef.current);
     return () => clearInterval(tickRef.current);
@@ -291,7 +291,7 @@ function OptionsPageInner() {
   useEffect(() => {
     if (activeTab !== "smc" || !authenticated || isDemoMode) return;
     fetchSMCAlerts();
-    const t = setInterval(fetchSMCAlerts, 60_000);
+    const t = setInterval(fetchSMCAlerts, 500);
     return () => clearInterval(t);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, expiry, authenticated]);
@@ -1508,7 +1508,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   const totalLotPnl   = tableAlerts.reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
   const realizedLotPnl = tableAlerts.filter(a => a.status !== "ACTIVE").reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
 
-  const COLS = "40px 60px 1fr 80px 70px 72px 72px 72px 90px 130px 80px";
+  const COLS = "40px 60px 1fr 80px 70px 70px 72px 72px 72px 90px 130px 65px 80px";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -1656,7 +1656,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       {/* ── Table header ── */}
       <div className="grid flex-shrink-0 border-b-2 border-[#cbd5e1] bg-[#f8fafc]"
         style={{ gridTemplateColumns: COLS }}>
-        {["#","TIME","SIGNALS","STRIKE","LTP","SL","T1","T2","STATUS","P&L · LOT (65)",""].map(h => (
+        {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)","MAX PTS",""].map(h => (
           <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase" style={MONO}>{h}</div>
         ))}
       </div>
@@ -1746,9 +1746,21 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   <div className="text-[8px] text-[#94a3b8]" style={MONO}>spot {a.spot?.toFixed(0)}</div>
                 </div>
 
-                {/* LTP (entry) */}
+                {/* ENTRY */}
                 <div className="px-2 py-2.5 text-[12px] font-bold tabular-nums" style={{...MONO, color:dirColor}}>
                   ₹{a.rr?.entry?.toFixed(2) ?? "—"}
+                </div>
+
+                {/* CMP */}
+                <div className="px-2 py-2.5">
+                  <div className="text-[11px] font-bold tabular-nums" style={{...MONO, color: a.status === "ACTIVE" ? (a.lastLtp >= a.rr?.entry ? "#16a34a" : "#e11d48") : "#64748b"}}>
+                    ₹{(a.lastLtp ?? a.rr?.entry)?.toFixed(2) ?? "—"}
+                  </div>
+                  {a.status === "ACTIVE" && a.lastLtp && (
+                    <div className="text-[8px]" style={{...MONO, color: a.lastLtp >= a.rr?.entry ? "#16a34a" : "#e11d48"}}>
+                      {a.lastLtp >= a.rr?.entry ? "+" : ""}{(a.lastLtp - a.rr?.entry).toFixed(2)}
+                    </div>
+                  )}
                 </div>
 
                 {/* SL */}
@@ -1828,8 +1840,28 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   </div>
                 </div>
 
-                {/* Add to watchlist */}
-                <div className="px-2 py-2.5 flex items-center justify-center">
+                {/* MAX PTS */}
+                <div className="px-2 py-2.5">
+                  {(a.peakMove ?? 0) > 0 ? (
+                    <div className="text-[11px] font-bold tabular-nums text-[#7c3aed]" style={MONO}>
+                      +{(a.peakMove).toFixed(2)}
+                    </div>
+                  ) : (
+                    <div className="text-[9px] text-[#94a3b8]" style={MONO}>—</div>
+                  )}
+                </div>
+
+                {/* Chart + watchlist */}
+                <div className="px-2 py-2.5 flex items-center justify-center gap-1 group">
+                  {a.expiry && a.strike && a.direction && (
+                    <button
+                      onClick={() => window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(a.expiry, a.strike, a.direction)}`, "_blank")}
+                      title="Open Sensibull chart"
+                      className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded cursor-pointer"
+                      style={{color: dirColor}}>
+                      <CandleIcon color={dirColor} />
+                    </button>
+                  )}
                   {a.leg && a.status === "ACTIVE" && (
                     <button onClick={() => onAddWatch(a.leg)}
                       title="Add to watchlist"

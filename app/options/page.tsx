@@ -11,6 +11,7 @@ import {
   type WatchedOption,
 } from "@/lib/options";
 import { smcApi, optionsApi, authApi, autoTradeApi, createWS, isDemoMode, AuthError } from "@/lib/api";
+import { ThemeToggle } from "@/lib/theme";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
@@ -76,6 +77,8 @@ function OptionsPageInner() {
       const wl = localStorage.getItem("kite_watchlist");
       if (wl) setWatchlist(JSON.parse(wl));
     } catch {}
+    const savedTab = localStorage.getItem("kite_tab") as "chain"|"smc"|"watchlist"|"ohlc" | null;
+    if (savedTab) setActiveTab(savedTab);
     setHydrated(true);
   }, []);
 
@@ -83,6 +86,11 @@ function OptionsPageInner() {
     if (!hydrated) return;
     try { localStorage.setItem("kite_watchlist", JSON.stringify(watchlist)); } catch {}
   }, [watchlist, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem("kite_tab", activeTab); } catch {}
+  }, [activeTab, hydrated]);
 
 
   const tickRef      = useRef<ReturnType<typeof setInterval>>();
@@ -453,6 +461,7 @@ function OptionsPageInner() {
               ⏻ LOGOUT
             </button>
           )}
+          <ThemeToggle />
         </div>
       </header>
 

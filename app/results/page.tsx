@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ThemeToggle } from "@/lib/theme";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
@@ -108,9 +109,12 @@ export default function ResultsPage() {
             RESULTS VIEWER
           </span>
         </div>
-        <span className="text-[9px] text-[#4a6080]" style={MONO}>
-          SMC ALGO · CSV REPORTS
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-[9px] text-[#4a6080]" style={MONO}>
+            SMC ALGO · RESULTS
+          </span>
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* ── Tabs ── */}

@@ -39,11 +39,12 @@ export const analysisApi = {
 };
 
 export const smcApi = {
-  status:     ()                           => req<any>("/api/smc/status"),
-  alerts:     (expiry:string)              => req<any>(`/api/smc/alerts?expiry=${expiry}`),
-  scan:       (expiry:string)              => req<any>(`/api/smc/scan?expiry=${expiry}`, { method:"POST" }),
-  clear:      ()                           => req("/api/smc/clear", { method:"DELETE" }),
-  historical: (date:string, expiry:string) => req<any>(`/api/smc/historical?date=${date}&expiry=${expiry}`),
+  status:       ()                           => req<any>("/api/smc/status"),
+  alerts:       (expiry:string)              => req<any>(`/api/smc/alerts?expiry=${expiry}`),
+  scan:         (expiry:string)              => req<any>(`/api/smc/scan?expiry=${expiry}`, { method:"POST" }),
+  clear:        ()                           => req("/api/smc/clear", { method:"DELETE" }),
+  historical:   (date:string, expiry:string) => req<any>(`/api/smc/historical?date=${date}&expiry=${expiry}`),
+  loadBacktest: (date:string)                => req<any>(`/api/smc/backtest-db?date=${date}`),
 };
 
 export const autoTradeApi = {

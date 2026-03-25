@@ -194,6 +194,7 @@ export default function ResultsPage() {
                 <th className="py-2 px-2 text-right">Lot P&L</th>
                 <th className="py-2 px-2 text-right">PnL%</th>
                 <th className="py-2 px-2 text-left">Concepts</th>
+                <th className="py-2 px-2 text-right">Max Pts</th>
               </tr>
             </thead>
             <tbody>
@@ -239,6 +240,7 @@ export default function ResultsPage() {
                       {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
                     </td>
                     <td className="py-2 px-2 text-[8px] text-[#64748b]">{r.Concepts}</td>
+                    <td className="py-2 px-2 text-right text-[#94a3b8]">{r.MaxPoints || "—"}</td>
                   </tr>
                 );
               })}
@@ -256,7 +258,7 @@ export default function ResultsPage() {
                 <td className="py-2.5 px-2 text-right font-bold text-[14px]" style={{ ...BEBAS, color: pnlColor(lotPnL) }}>
                   {lotPnL >= 0 ? "+" : ""}₹{Math.abs(lotPnL).toFixed(0)}
                 </td>
-                <td colSpan={2} />
+                <td colSpan={3} />
               </tr>
             </tfoot>
           </table>

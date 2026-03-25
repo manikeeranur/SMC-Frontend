@@ -1,61 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
-import path from "path";
 
-const DIRS = {
-  backtest: "BacktestResultsDateWise",
-  live:     "liveAlertsDateWise",
-};
+const BACKEND = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
-function listDates(type: "backtest" | "live"): string[] {
-  const dir = path.join(process.cwd(), "public", DIRS[type]);
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
-    .filter(f => f.endsWith(".csv"))
-    .map(f => f.replace(".csv", ""))
-    .sort()
-    .reverse();
-}
-
-function parseCSV(filePath: string): Record<string, string>[] {
-  const text = fs.readFileSync(filePath, "utf8");
-  const lines = text.trim().split("\n");
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",");
-  return lines.slice(1).map(line => {
-    // Handle quoted fields
-    const vals: string[] = [];
-    let cur = "", inQ = false;
-    for (const ch of line) {
-      if (ch === '"') { inQ = !inQ; continue; }
-      if (ch === "," && !inQ) { vals.push(cur); cur = ""; continue; }
-      cur += ch;
-    }
-    vals.push(cur);
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h.trim()] = (vals[i] ?? "").trim(); });
-    return row;
-  });
+async function fetchFromBackend(url: string) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`Backend ${res.status}`);
+  return res.json();
 }
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const type = (searchParams.get("type") ?? "backtest") as "backtest" | "live";
+  const type = searchParams.get("type") ?? "backtest";
   const date = searchParams.get("date");
 
-  // List available dates
   if (!date) {
-    return NextResponse.json({
-      backtest: listDates("backtest"),
-      live:     listDates("live"),
-    });
+    try {
+      const data = await fetchFromBackend(`${BACKEND}/api/results`);
+      return NextResponse.json({ live: data.live ?? [], backtest: data.backtest ?? [] });
+    } catch {
+      return NextResponse.json({ error: "Backend unavailable" }, { status: 503 });
+    }
   }
 
-  const filePath = path.join(process.cwd(), "public", DIRS[type], `${date}.csv`);
-  if (!fs.existsSync(filePath)) {
-    return NextResponse.json({ error: "File not found" }, { status: 404 });
+  try {
+    const data = await fetchFromBackend(`${BACKEND}/api/results?type=${type}&date=${date}`);
+    if (!data.rows?.length) return NextResponse.json({ error: "No data found for this date" }, { status: 404 });
+    return NextResponse.json({ date, type, rows: data.rows });
+  } catch {
+    return NextResponse.json({ error: "No data found for this date" }, { status: 404 });
   }
-
-  const rows = parseCSV(filePath);
-  return NextResponse.json({ date, type, rows });
 }

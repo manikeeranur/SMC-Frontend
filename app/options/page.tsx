@@ -247,11 +247,6 @@ function OptionsPageInner() {
       const alerts = r.alerts ?? [];
       setSmcAlerts(alerts);
       setSmcWinRate(r.winRate ?? null);
-      // Save to local CSV
-      if (alerts.length) {
-        const date = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // YYYY-MM-DD
-        fetch("/api/export/live-alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alerts, date }) }).catch(() => {});
-      }
     } catch {}
   }
 
@@ -265,6 +260,20 @@ function OptionsPageInner() {
     finally { setSmcBusy(false); }
   }
 
+  // Auto-load backtest from MongoDB when date changes
+  useEffect(() => {
+    if (!authenticated || isDemoMode) return;
+    smcApi.loadBacktest(histDate).then((data: any) => {
+      if (data.results?.length) {
+        setHistResults(data.results);
+        if (data.winRate != null) setSmcWinRate(data.winRate);
+      } else {
+        setHistResults(null);
+      }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [histDate, authenticated]);
+
   async function runHistoricalSMC() {
     if (!expiry || isDemoMode || !authenticated) return;
     setHistBusy(true);
@@ -276,10 +285,6 @@ function OptionsPageInner() {
       setHistResults(results);
       // also update winRate display from historical result
       if (r.winRate !== null && r.winRate !== undefined) setSmcWinRate(r.winRate);
-      // Save to local CSV
-      if (results.length) {
-        fetch("/api/export/backtest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ results, date: histDate }) }).catch(() => {});
-      }
     } catch (e: any) {
       setHistErr(e.message || "Failed to fetch historical scan");
     } finally {

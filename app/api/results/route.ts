@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const BACKEND = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const BACKEND = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL;
 
 async function fetchFromBackend(url: string) {
   const res = await fetch(url, { cache: "no-store" });

@@ -1,4 +1,4 @@
-const API  = process.env.NEXT_PUBLIC_API_URL  || "https://smc-backend-yheu.onrender.com";
+const API  = process.env.NEXT_PUBLIC_API_URL!;
 const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 export class AuthError extends Error {
@@ -65,7 +65,7 @@ export const watchlistApi = {
 
 export function createWS(onMessage: (msg:any) => void): WebSocket | null {
   if (typeof window === "undefined") return null;
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "wss://smc-backend-yheu.onrender.com";
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL!;
   const ws = new WebSocket(wsUrl);
   ws.onopen    = () => console.log("[WS] Connected to backend");
   ws.onmessage = (e) => { try { onMessage(JSON.parse(e.data)); } catch {} };

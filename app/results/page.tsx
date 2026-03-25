@@ -30,6 +30,14 @@ function dirColor(d: string) {
   return d === "CE" ? "#22c55e" : "#ef4444";
 }
 
+function fmtTime(t: string) {
+  if (!t) return "—";
+  const [h, m] = t.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12  = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
 function pnlColor(p: number) {
   return p >= 0 ? "#22c55e" : "#ef4444";
 }
@@ -209,8 +217,8 @@ export default function ResultsPage() {
                     className="border-b border-[#0f1923] hover:bg-[#0f1923] transition-colors"
                     style={{ background: isWin ? "#052e1622" : isLoss ? "#2d050522" : undefined }}>
                     <td className="py-2 px-2 text-[#4a6080]">{i + 1}</td>
-                    <td className="py-2 px-2 text-[#94a3b8]">{r.EntryTime}</td>
-                    <td className="py-2 px-2 text-[#94a3b8]">{r.ExitTime || "—"}</td>
+                    <td className="py-2 px-2 text-[#94a3b8]">{fmtTime(r.EntryTime)}</td>
+                    <td className="py-2 px-2 text-[#94a3b8]">{fmtTime(r.ExitTime)}</td>
                     <td className="py-2 px-2 text-center">
                       <span className="px-1.5 py-0.5 rounded-sm text-[8px] font-bold"
                         style={{ background: `${dirColor(r.Direction)}22`, color: dirColor(r.Direction), border: `1px solid ${dirColor(r.Direction)}44` }}>

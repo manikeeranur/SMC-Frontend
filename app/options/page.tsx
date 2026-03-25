@@ -1468,6 +1468,14 @@ function PayoffPanel({ target, spot, entryPrice }: {
   );
 }
 
+function fmtTime(t: string) {
+  if (!t) return "—";
+  const [h, m] = t.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12  = h % 12 || 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
 // ─── SMC TABLE VIEW ────────────────────────────────────────────────────────────
 function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   onTrigger, onClear, onAddWatch,
@@ -1722,9 +1730,9 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
 
                 {/* TIME */}
                 <div className="px-2 py-2.5">
-                  <div className="text-[10px] font-bold text-[#1e293b]" style={MONO}>{a.entryTime}</div>
+                  <div className="text-[10px] font-bold text-[#1e293b]" style={MONO}>{fmtTime(a.entryTime)}</div>
                   {a.exitTime
-                    ? <div className="text-[8px] text-[#94a3b8]" style={MONO}>→{a.exitTime}</div>
+                    ? <div className="text-[8px] text-[#94a3b8]" style={MONO}>→{fmtTime(a.exitTime)}</div>
                     : <div className="text-[8px] text-[#94a3b8]" style={MONO}>{a.strength}</div>}
                 </div>
 

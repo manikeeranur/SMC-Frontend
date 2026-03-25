@@ -1,4 +1,4 @@
-const API = process.env.NEXT_PUBLIC_API_URL || "https://13.61.175.6:4000";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
 
 const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 

@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-const API  = process.env.NEXT_PUBLIC_API_URL!;
-=======
 const API = process.env.NEXT_PUBLIC_API_URL || "https://13.61.175.6:4000";
->>>>>>> 734d07b (fix: update API and WebSocket URLs to use the new backend server)
+
 const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
 export class AuthError extends Error {

@@ -2,7 +2,7 @@
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
-const API   = process.env.NEXT_PUBLIC_API_URL || "https://smc-backend-yheu.onrender.com";
+const API   = process.env.NEXT_PUBLIC_API_URL || "https://13.61.175.6:4000";
 
 interface Props {
   onConnected: (userName: string) => void;

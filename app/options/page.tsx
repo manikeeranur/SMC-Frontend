@@ -139,7 +139,9 @@ function OptionsPageInner() {
         localStorage.removeItem("kite_auth");
         localStorage.removeItem("kite_user");
       }
-    }).catch(() => setAuthenticated(false));
+    }).catch(() => {
+      // Network error — keep existing localStorage auth state, don't force logout
+    });
   }, [kiteStatus, kiteUser]);
 
   useEffect(() => { if (isDemoMode && expiries.length && !expiry) setExpiry(expiries[0]); }, [expiries, expiry]);

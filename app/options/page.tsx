@@ -13,7 +13,7 @@ import {
 import { smcApi, optionsApi, authApi, autoTradeApi, createWS, isDemoMode, AuthError } from "@/lib/api";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ResultsContent } from "@/app/results/page";
+import { ResultsContent } from "@/components/ResultsContent";
 import {
   IconPower, IconCopy, IconCopyCheck, IconX,
   IconChartCandle, IconScan, IconStar, IconStarFilled,

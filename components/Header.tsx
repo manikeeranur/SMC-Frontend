@@ -17,7 +17,7 @@ export function Header({ connected, demoMode }: Props) {
       <div className="flex items-center gap-4">
         <div className="text-[22px] tracking-[4px] text-[#00d4ff]"
           style={{ fontFamily:"'Bebas Neue',sans-serif", textShadow:"0 0 18px rgba(0,212,255,0.35)" }}>
-          NIFTY<span className="text-[#ff6b35]">.</span>OPTIONS
+          ALGO<span className="text-[#ff6b35]">.</span>BOT
         </div>
       </div>
       <div className="flex items-center gap-5">

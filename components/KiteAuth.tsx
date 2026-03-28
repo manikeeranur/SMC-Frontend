@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import { IconBolt, IconLoader2 } from "@tabler/icons-react";
+
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
 const API   = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
@@ -47,7 +49,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
       }} />
 
       {/* Main layout */}
-      <div className="relative z-10 w-[420px] flex flex-col items-center">
+      <div className="relative z-10 w-full max-w-[420px] mx-4 sm:mx-0 flex flex-col items-center">
 
         {/* Status pill */}
         <div className="flex items-center gap-2 px-4 py-1.5 mb-8 border border-[#0f1923] bg-[#080b0f]/80 rounded-full backdrop-blur-sm">
@@ -59,10 +61,10 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
 
         {/* Brand */}
         <div className="text-center mb-8">
-          <div className="text-[58px] leading-none tracking-[2px] mb-1" style={BEBAS}>
-            <span className="text-white">NIFTY</span>
+          <div className="text-[42px] sm:text-[58px] leading-none tracking-[2px] mb-1" style={BEBAS}>
+            <span className="text-white">ALGO</span>
             <span style={{ color: "#0284c7" }}>.</span>
-            <span style={{ color: "#ea580c" }}>ALGO</span>
+            <span style={{ color: "#ea580c" }}>BOT</span>
           </div>
           <div className="flex items-center justify-center gap-3">
             <div className="h-px w-12 bg-gradient-to-r from-transparent to-[#1e2a3a]" />
@@ -87,7 +89,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
           <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-[#ea580c]/30" />
 
           {/* Header */}
-          <div className="px-8 pt-7 pb-5" style={{ borderBottom: "1px solid #0f1923" }}>
+          <div className="px-5 sm:px-8 pt-7 pb-5" style={{ borderBottom: "1px solid #0f1923" }}>
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-[8px] tracking-[2.5px] mb-1" style={{ ...MONO, color: "#2a3a4a" }}>AUTHENTICATION REQUIRED</div>
@@ -101,7 +103,7 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
           </div>
 
           {/* Body */}
-          <div className="px-8 py-7 space-y-5">
+          <div className="px-5 sm:px-8 py-7 space-y-5">
 
             {/* Error */}
             {errorMsg && (
@@ -128,8 +130,8 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
                   boxShadow: "0 0 24px rgba(234,88,12,0.06)",
                 }}>
                 {connecting
-                  ? <><span className="w-3 h-3 rounded-full border border-[#ea580c] border-t-transparent animate-spin" />CONNECTING…</>
-                  : <>⚡ CONNECT KITE</>}
+                  ? <><IconLoader2 size={14} className="animate-spin" />CONNECTING…</>
+                  : <><IconBolt size={14} /> CONNECT KITE</>}
               </button>
             </div>
 

@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "@/lib/theme";
 
+const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
+
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
 
@@ -67,7 +69,7 @@ export function ResultsContent() {
   const [err, setErr]         = useState("");
 
   useEffect(() => {
-    fetch("/api/results")
+    fetch(`${API}/api/results`)
       .then(r => r.json())
       .then(d => {
         setDates(d);
@@ -87,7 +89,7 @@ export function ResultsContent() {
     if (!selDate) return;
     setLoading(true);
     setErr("");
-    fetch(`/api/results?type=${tab}&date=${selDate}`)
+    fetch(`${API}/api/results?type=${tab}&date=${selDate}`)
       .then(r => r.json())
       .then(d => {
         if (d.error) { setErr(d.error); setRows([]); }

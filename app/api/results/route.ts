@@ -2,31 +2,29 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL;
 
-async function fetchFromBackend(url: string) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`Backend ${res.status}`);
-  return res.json();
-}
-
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const type = searchParams.get("type") ?? "backtest";
-  const date = searchParams.get("date");
-
-  if (!date) {
-    try {
-      const data = await fetchFromBackend(`${BACKEND}/api/results`);
-      return NextResponse.json({ live: data.live ?? [], backtest: data.backtest ?? [] });
-    } catch {
-      return NextResponse.json({ error: "Backend unavailable" }, { status: 503 });
-    }
+  if (!BACKEND) {
+    return NextResponse.json({ error: "Backend URL not configured" }, { status: 503 });
   }
 
+  const { searchParams } = req.nextUrl;
+  const type = searchParams.get("type");
+  const date = searchParams.get("date");
+
   try {
-    const data = await fetchFromBackend(`${BACKEND}/api/results?type=${type}&date=${date}`);
-    if (!data.rows?.length) return NextResponse.json({ error: "No data found for this date" }, { status: 404 });
-    return NextResponse.json({ date, type, rows: data.rows });
+    const url = type && date
+      ? `${BACKEND}/api/results?type=${type}&date=${date}`
+      : `${BACKEND}/api/results`;
+
+    const res = await fetch(url, { cache: "no-store" });
+
+    if (!res.ok) {
+      return NextResponse.json({ error: `Backend error ${res.status}` }, { status: res.status });
+    }
+
+    const data = await res.json();
+    return NextResponse.json(data);
   } catch {
-    return NextResponse.json({ error: "No data found for this date" }, { status: 404 });
+    return NextResponse.json({ error: "Backend unavailable" }, { status: 503 });
   }
 }

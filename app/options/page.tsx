@@ -63,6 +63,7 @@ function OptionsPageInner() {
   const dragIdxRef = useRef<number|null>(null);
   const [authenticated, setAuthenticated] = useState(isDemoMode);
   const [liveUser, setLiveUser]       = useState(kiteUser);
+  const [tokenCopied, setTokenCopied] = useState(false);
   const [hydrated, setHydrated]       = useState(false);
   const [ohlcDate, setOhlcDate]       = useState(() => new Date().toISOString().split("T")[0]);
   const [ohlcCE,   setOhlcCE]         = useState<{token:number; strike:number} | null>(null);
@@ -243,6 +244,19 @@ function OptionsPageInner() {
   }, [live, refresh]);
 
   // ── SMC alerts fetch + manual trigger ─────────────────────────────────────
+  async function handleCopyToken() {
+    try {
+      const API = process.env.NEXT_PUBLIC_API_URL!;
+      const res  = await fetch(`${API}/api/auth/token-value`);
+      const data = await res.json();
+      if (data.access_token) {
+        await navigator.clipboard.writeText(data.access_token);
+        setTokenCopied(true);
+        setTimeout(() => setTokenCopied(false), 2000);
+      }
+    } catch {}
+  }
+
   async function handleLogout() {
     try { await authApi.logout(); } catch {}
     localStorage.removeItem("kite_auth");
@@ -490,6 +504,29 @@ function OptionsPageInner() {
           )}
           <span>·</span>
           <span>{data?.updatedAt ? new Date(data.updatedAt).toLocaleTimeString("en-IN",{hour12:false}) : "—"}</span>
+
+          {/* User name */}
+          {!isDemoMode && liveUser && (
+            <div className="flex items-center gap-1.5 px-2 py-1 border border-[#cbd5e1] rounded-sm bg-[#f8fafc]">
+              <span className="text-[8px] text-[#94a3b8]" style={MONO}>USER</span>
+              <span className="text-[9px] font-bold text-[#1e293b]" style={MONO}>{liveUser}</span>
+            </div>
+          )}
+
+          {/* Copy token */}
+          {!isDemoMode && authenticated && (
+            <button onClick={handleCopyToken}
+              className="flex items-center gap-1.5 px-2.5 py-1 border rounded-sm cursor-pointer transition-all text-[9px] font-bold"
+              style={{
+                ...MONO,
+                borderColor: tokenCopied ? "#16a34a" : "#cbd5e1",
+                color:       tokenCopied ? "#16a34a" : "#64748b",
+                background:  tokenCopied ? "rgba(22,163,74,0.06)" : "transparent",
+              }}
+              title="Copy access token to clipboard">
+              {tokenCopied ? "✓ COPIED" : "⎘ TOKEN"}
+            </button>
+          )}
         </div>
       </div>
 

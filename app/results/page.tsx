@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ThemeToggle } from "@/lib/theme";
+import { ThemeToggle, useTheme } from "@/lib/theme";
+import { IconArrowLeft } from "@tabler/icons-react";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
@@ -19,16 +20,16 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 function statusLabel(s: string) {
-  return s === "TARGET" ? "TARGET ✅"
+  return s === "TARGET" ? "TARGET ✓"
     : s === "TIME_PROFIT" ? "T-PROFIT"
-    : s === "SL"          ? "SL ❌"
+    : s === "SL"          ? "SL ✗"
     : s === "TIME_EXIT"   ? "T-EXIT"
     : s === "EOD"         ? "EOD"
     : s;
 }
 
 function dirColor(d: string) {
-  return d === "CE" ? "#22c55e" : "#ef4444";
+  return d === "CE" ? "#0284c7" : "#e11d48";
 }
 
 function fmtTime(t: string) {
@@ -43,35 +44,47 @@ function pnlColor(p: number) {
   return p >= 0 ? "#22c55e" : "#ef4444";
 }
 
-export default function ResultsPage() {
-  const router = useRouter();
-  const [tab, setTab]           = useState<"backtest" | "live">("backtest");
-  const [dates, setDates]       = useState<{ backtest: string[]; live: string[] }>({ backtest: [], live: [] });
-  const [selDate, setSelDate]   = useState("");
-  const [rows, setRows]         = useState<Row[]>([]);
-  const [loading, setLoading]   = useState(false);
-  const [err, setErr]           = useState("");
+function fmtLotPnl(n: number) {
+  const abs = Math.abs(n);
+  const s   = n >= 0 ? "+" : "−";
+  return abs >= 100000
+    ? `${s}₹${(abs / 100000).toFixed(2)}L`
+    : abs >= 1000
+    ? `${s}₹${(abs / 1000).toFixed(1)}K`
+    : `${s}₹${abs.toFixed(0)}`;
+}
 
-  // Load available dates on mount
+const LOT_QTY = 65;
+const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 130px 65px";
+
+export function ResultsContent() {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+
+  const [tab, setTab]         = useState<"backtest" | "live">("backtest");
+  const [dates, setDates]     = useState<{ backtest: string[]; live: string[] }>({ backtest: [], live: [] });
+  const [selDate, setSelDate] = useState("");
+  const [rows, setRows]       = useState<Row[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr]         = useState("");
+
   useEffect(() => {
     fetch("/api/results")
       .then(r => r.json())
       .then(d => {
         setDates(d);
-        const first = d[tab === "backtest" ? "backtest" : "live"]?.[0];
+        const first = d["backtest"]?.[0];
         if (first) setSelDate(first);
       })
       .catch(() => setErr("Failed to load dates"));
   }, []);
 
-  // When tab changes, reset to first date of new tab
   useEffect(() => {
     const first = dates[tab]?.[0] ?? "";
     setSelDate(first);
     setRows([]);
   }, [tab]);
 
-  // Load CSV when date/tab changes
   useEffect(() => {
     if (!selDate) return;
     setLoading(true);
@@ -86,205 +99,496 @@ export default function ResultsPage() {
       .finally(() => setLoading(false));
   }, [selDate, tab]);
 
-  // ── Stats ─────────────────────────────────────────────────────────────────
-  const wins      = rows.filter(r => r.Status === "TARGET" || r.Status === "TIME_PROFIT").length;
-  const losses    = rows.filter(r => r.Status === "SL" || r.Status === "TIME_EXIT").length;
-  const eod       = rows.filter(r => r.Status === "EOD").length;
-  const closed    = wins + losses;
-  const winRate   = closed > 0 ? ((wins / closed) * 100).toFixed(1) : null;
-  const totalPnL  = rows.reduce((s, r) => s + (parseFloat(r.PnL) || 0), 0);
-  const lotPnL    = totalPnL * 65;
+  const wins     = rows.filter(r => r.Status === "TARGET" || r.Status === "TIME_PROFIT").length;
+  const losses   = rows.filter(r => r.Status === "SL" || r.Status === "TIME_EXIT").length;
+  const eod      = rows.filter(r => r.Status === "EOD").length;
+  const closed   = wins + losses;
+  const winRate  = closed > 0 ? ((wins / closed) * 100).toFixed(1) : null;
+  const totalPnL = rows.reduce((s, r) => s + (parseFloat(r.PnL) || 0), 0);
+  const lotPnL   = totalPnL * LOT_QTY;
 
   return (
-    <div className="min-h-screen bg-[#080b0f] text-[#e2e8f0]" style={MONO}>
+    <div className="h-full flex flex-col overflow-hidden"
+      style={{ background: isDark ? "#080b0f" : "#fff", color: isDark ? "#e2e8f0" : "#1e293b" }}>
 
-      {/* ── Header ── */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-[#1e2a3a]">
-        <div className="flex items-center gap-4">
-          <button onClick={() => router.push("/options")}
-            className="text-[10px] text-[#64748b] hover:text-[#94a3b8] cursor-pointer" style={MONO}>
-            ← BACK
-          </button>
-          <span className="text-[16px] text-[#e2e8f0] tracking-[3px]" style={BEBAS}>
-            RESULTS VIEWER
-          </span>
+      {/* ── Tabs + Date ── */}
+      <div className="flex flex-wrap items-center gap-2 px-3 sm:px-5 py-2.5 border-b flex-shrink-0 overflow-x-auto"
+        style={{ borderColor: isDark ? "#1e2a3a" : "#e2e8f0", background: isDark ? "#080b0f" : "#fff" }}>
+
+        {/* BACKTEST / LIVE toggle */}
+        <div className="flex border rounded-sm overflow-hidden flex-shrink-0"
+          style={{ borderColor: isDark ? "#1e2a3a" : "#cbd5e1" }}>
+          {(["backtest", "live"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className="px-2 sm:px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors whitespace-nowrap"
+              style={{
+                ...MONO,
+                background: tab === t ? (t === "backtest" ? "#ea580c" : "#7c3aed") : "transparent",
+                color: tab === t ? "#fff" : isDark ? "#64748b" : "#64748b",
+              }}>
+              {t === "backtest" ? "◉ BACKTEST" : "▶ LIVE"}
+            </button>
+          ))}
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-[9px] text-[#4a6080]" style={MONO}>
-            SMC ALGO · RESULTS
-          </span>
-          <ThemeToggle />
-        </div>
-      </div>
 
-      {/* ── Tabs ── */}
-      <div className="flex items-center gap-2 px-6 py-3 border-b border-[#1e2a3a]">
-        {(["backtest", "live"] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 text-[10px] tracking-[1px] uppercase rounded-sm border cursor-pointer transition-colors ${tab === t ? "bg-[#ea580c22] border-[#ea580c] text-[#ea580c]" : "bg-transparent border-[#2a3a4a] text-[#64748b] hover:border-[#4a6080]"}`}
-            style={MONO}>
-            {t === "backtest" ? "Backtest Results" : "Live Alerts"}
-          </button>
-        ))}
+        {/* Win rate badge */}
+        {winRate !== null && (
+          <div className="flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
+            style={{
+              background: Number(winRate) >= 70
+                ? (isDark ? "#052e16" : "#f0fdf4")
+                : (isDark ? "#2d0505" : "#fef2f2"),
+              borderColor: Number(winRate) >= 70
+                ? (isDark ? "#166534" : "#bbf7d0")
+                : (isDark ? "#991b1b" : "#fecaca"),
+            }}>
+            <span className="text-[9px] font-bold whitespace-nowrap"
+              style={{ ...MONO, color: Number(winRate) >= 70 ? "#16a34a" : "#e11d48" }}>
+              {winRate}% · {wins}W/{losses}L{eod > 0 ? ` · ${eod}E` : ""}
+            </span>
+          </div>
+        )}
 
-        {/* Date picker */}
-        <div className="ml-auto flex items-center gap-2">
-          <span className="text-[9px] text-[#4a6080]">DATE:</span>
-          <select
-            value={selDate}
-            onChange={e => setSelDate(e.target.value)}
-            className="bg-[#0f1923] border border-[#2a3a4a] text-[#e2e8f0] text-[10px] px-2 py-1 rounded-sm cursor-pointer"
-            style={MONO}>
-            {(dates[tab] ?? []).map(d => (
-              <option key={d} value={d}>{d}</option>
-            ))}
+        {/* LOT P&L */}
+        {rows.length > 0 && (
+          <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0">
+            <span className="text-[7px] tracking-[1px]"
+              style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>LOT P&L</span>
+            <span className="text-[13px] font-bold" style={{ ...BEBAS, color: pnlColor(lotPnL) }}>
+              {lotPnL >= 0 ? "+" : ""}₹{Math.abs(lotPnL).toFixed(0)}
+            </span>
+          </div>
+        )}
+
+        {/* Date selector */}
+        <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          <span className="hidden sm:block text-[9px]"
+            style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>DATE:</span>
+          <select value={selDate} onChange={e => setSelDate(e.target.value)}
+            className="text-[10px] px-2 py-1 rounded-sm cursor-pointer outline-none"
+            style={{
+              ...MONO,
+              background: isDark ? "#0f1923" : "#f8fafc",
+              border: `1px solid ${isDark ? "#2a3a4a" : "#cbd5e1"}`,
+              color: isDark ? "#e2e8f0" : "#1e293b",
+            }}>
+            {(dates[tab] ?? []).map(d => <option key={d} value={d}>{d}</option>)}
             {!(dates[tab]?.length) && <option value="">— no files —</option>}
           </select>
         </div>
       </div>
 
-      {/* ── Summary Bar ── */}
-      {rows.length > 0 && (
-        <div className="flex items-center gap-6 px-6 py-3 border-b border-[#1e2a3a] bg-[#0a1118]">
-          <Stat label="TRADES" value={String(rows.length)} />
-          <div className="w-px h-6 bg-[#1e2a3a]" />
-          <Stat label="WIN" value={String(wins)} color="#22c55e" />
-          <Stat label="LOSS" value={String(losses)} color="#ef4444" />
-          {eod > 0 && <Stat label="EOD" value={String(eod)} color="#94a3b8" />}
-          <div className="w-px h-6 bg-[#1e2a3a]" />
-          <Stat label="WIN RATE" value={winRate ? `${winRate}%` : "—"} color={winRate && +winRate >= 50 ? "#22c55e" : "#ef4444"} />
-          <div className="w-px h-6 bg-[#1e2a3a]" />
-          <div className="flex flex-col">
-            <span className="text-[8px] text-[#4a6080] tracking-[1px]">PREMIUM P&L</span>
-            <span className="text-[13px] font-bold" style={{ color: pnlColor(totalPnL) }}>
-              {totalPnL >= 0 ? "+" : ""}{totalPnL.toFixed(2)} RS
-            </span>
-          </div>
-          <div className="w-px h-6 bg-[#1e2a3a]" />
-          <div className="flex flex-col">
-            <span className="text-[8px] text-[#4a6080] tracking-[1px]">LOT P&L (×65)</span>
-            <span className="text-[15px] font-bold" style={{ ...BEBAS, color: pnlColor(lotPnL) }}>
-              {lotPnL >= 0 ? "+" : ""}₹{Math.abs(lotPnL).toFixed(0)}
-            </span>
-          </div>
+      {/* ── States ── */}
+      {loading && (
+        <div className="flex-1 flex items-center justify-center text-[10px]"
+          style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>Loading...</div>
+      )}
+      {!loading && err && (
+        <div className="flex-1 flex items-center justify-center text-[10px]"
+          style={{ ...MONO, color: "#e11d48" }}>{err}</div>
+      )}
+      {!loading && !err && rows.length === 0 && selDate && (
+        <div className="flex-1 flex items-center justify-center text-[10px]"
+          style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>No data for {selDate}</div>
+      )}
+      {!loading && !err && !selDate && (
+        <div className="flex-1 flex items-center justify-center text-[10px] text-center px-6"
+          style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>
+          No CSV files found. Run a backtest or wait for live alerts to be saved.
         </div>
       )}
 
-      {/* ── Table ── */}
-      <div className="px-6 py-4 overflow-x-auto">
-        {loading && (
-          <div className="text-[10px] text-[#4a6080] py-10 text-center" style={MONO}>Loading...</div>
-        )}
-        {err && (
-          <div className="text-[10px] text-[#e11d48] py-10 text-center" style={MONO}>{err}</div>
-        )}
-        {!loading && !err && rows.length === 0 && selDate && (
-          <div className="text-[10px] text-[#4a6080] py-10 text-center" style={MONO}>No data for {selDate}</div>
-        )}
-        {!loading && !err && !selDate && (
-          <div className="text-[10px] text-[#4a6080] py-10 text-center" style={MONO}>
-            No CSV files found. Run a backtest or wait for live alerts to be saved.
+      {/* ── Results ── */}
+      {!loading && rows.length > 0 && (
+        <>
+          {/* ══ MOBILE CARDS (hidden md+) ══ */}
+          <div className="md:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
+            {rows.map((r, i) => {
+              const pnl    = parseFloat(r.PnL) || 0;
+              const lPnl   = pnl * LOT_QTY;
+              const pnlPct = parseFloat(r.PnLPct) || 0;
+              const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT";
+              const isLoss = r.Status === "SL" || r.Status === "TIME_EXIT";
+              const dc     = dirColor(r.Direction);
+              const sc     = STATUS_COLOR[r.Status] ?? "#94a3b8";
+              const stIco  = r.Status === "TARGET" ? "🎯"
+                : r.Status === "SL" ? "🛑"
+                : r.Status === "EOD" ? "🕐"
+                : r.Status === "ACTIVE" ? "⏳" : "⏹";
+              const stLbl  = r.Status === "TIME_PROFIT" ? "T-PROFIT"
+                : r.Status === "TIME_EXIT" ? "T-EXIT"
+                : r.Status;
+              const t1Hit  = r.T1Hit === "Y";
+              const t2Hit  = r.Status === "TARGET";
+              return (
+                <div key={i} className="rounded-xl overflow-hidden"
+                  style={{
+                    background: isDark ? "#0d1420" : "#fff",
+                    border: `1px solid ${isWin ? "#22c55e33" : isLoss ? "#ef444433" : isDark ? "#1e2a3a" : "#e2e8f0"}`,
+                    borderLeft: `3px solid ${isWin ? "#22c55e" : isLoss ? "#e11d48" : dc}`,
+                  }}>
+
+                  {/* Top section */}
+                  <div className="px-3 py-3 flex items-start justify-between gap-2"
+                    style={{ background: isWin ? (isDark ? "rgba(34,197,94,0.04)" : "rgba(34,197,94,0.03)") : isLoss ? (isDark ? "rgba(239,68,68,0.04)" : "rgba(239,68,68,0.03)") : undefined }}>
+                    <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                      {/* Direction badge */}
+                      <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0"
+                        style={{ background: `${dc}18`, border: `1.5px solid ${dc}40` }}>
+                        <span className="text-[7px] font-bold"
+                          style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>NI</span>
+                        <span className="text-[12px] font-bold"
+                          style={{ ...BEBAS, color: dc }}>{r.Direction}</span>
+                      </div>
+                      {/* Instrument + time + concepts */}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[15px] font-bold leading-tight"
+                          style={{ ...BEBAS, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                          NIFTY {r.Strike} {r.Direction === "CE" ? "Call" : "Put"}
+                        </div>
+                        <div className="text-[8px] mt-0.5"
+                          style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>
+                          {fmtTime(r.EntryTime)}{r.ExitTime ? ` → ${fmtTime(r.ExitTime)}` : " → ACTIVE"}
+                        </div>
+                        {r.Concepts && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {r.Concepts.split(",").map((c: string) => (
+                              <span key={c} className="text-[7px] px-1 py-0.5 rounded-sm font-bold"
+                                style={{ ...MONO, background: isDark ? "#1e2a3a" : "#f1f5f9", color: isDark ? "#64748b" : "#94a3b8" }}>
+                                {c.trim()}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Right: status + T1/T2 */}
+                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                      <span className="text-[8px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ ...MONO, background: `${sc}18`, color: sc, border: `1px solid ${sc}40` }}>
+                        {stIco} {stLbl}
+                      </span>
+                      <div className="flex gap-1">
+                        <span className="text-[7px] px-1.5 py-0.5 rounded-sm font-bold"
+                          style={{
+                            ...MONO,
+                            background: t1Hit ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                            color: t1Hit ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8"),
+                          }}>
+                          T1{t1Hit ? "✓" : "✗"}
+                        </span>
+                        <span className="text-[7px] px-1.5 py-0.5 rounded-sm font-bold"
+                          style={{
+                            ...MONO,
+                            background: t2Hit ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                            color: t2Hit ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8"),
+                          }}>
+                          T2{t2Hit ? "✓" : "✗"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* T1 / T2 bold line */}
+                  <div className="px-3 py-1.5 flex items-center gap-3 border-t"
+                    style={{ background: isDark ? "#0d1420" : "#f8fafc", borderColor: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+                    <span className="text-[9px] font-bold"
+                      style={{ ...MONO, color: "#b45309" }}>
+                      T1 ₹{r.Target1 ?? "—"}{t1Hit ? " ✓" : ""}
+                    </span>
+                    <span className="text-[9px] font-bold"
+                      style={{ ...MONO, color: "#16a34a" }}>
+                      T2 ₹{r.Target2 ?? "—"}{t2Hit ? " ✓" : ""}
+                    </span>
+                    {r.MaxPoints && (
+                      <span className="text-[9px] font-bold"
+                        style={{ ...MONO, color: "#7c3aed" }}>
+                        MAX +{r.MaxPoints}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Footer: ENTRY | SL | LOT P&L */}
+                  <div className="grid grid-cols-3 border-t"
+                    style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+                    <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                      <div className="text-[7px] tracking-[1px] mb-0.5"
+                        style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>ENTRY</div>
+                      <div className="text-[12px] font-bold tabular-nums"
+                        style={{ ...MONO, color: dc }}>₹{r.Entry}</div>
+                    </div>
+                    <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                      <div className="text-[7px] tracking-[1px] mb-0.5"
+                        style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>STOP LOSS</div>
+                      <div className="text-[12px] font-bold tabular-nums"
+                        style={{ ...MONO, color: "#e11d48" }}>₹{r.SL}</div>
+                    </div>
+                    <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                      <div className="text-[7px] tracking-[1px] mb-0.5"
+                        style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>LOT P&L</div>
+                      <div className="text-[13px] font-bold tabular-nums"
+                        style={{ ...MONO, color: pnlColor(lPnl) }}>{fmtLotPnl(lPnl)}</div>
+                      <div className="text-[8px]"
+                        style={{ ...MONO, color: pnlColor(pnlPct) }}>
+                        {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Mobile totals row */}
+            <div className="rounded-xl overflow-hidden"
+              style={{ background: isDark ? "#0d1420" : "#f8fafc", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
+              <div className="grid grid-cols-3"
+                style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+                {[
+                  { label: "TRADES",   val: `${rows.length}`,          color: isDark ? "#475569" : "#64748b" },
+                  { label: "WIN RATE", val: winRate ? `${winRate}%` : "—", color: winRate && +winRate >= 70 ? "#16a34a" : "#e11d48" },
+                  { label: "LOT P&L",  val: fmtLotPnl(lotPnL),          color: pnlColor(lotPnL) },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="px-3 py-2.5 text-center"
+                    style={{ background: isDark ? "#0a0f16" : "#fff" }}>
+                    <div className="text-[7px] tracking-[1.5px] mb-1"
+                      style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>{label}</div>
+                    <div className="text-[15px] font-bold" style={{ ...MONO, color }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        )}
 
-        {!loading && rows.length > 0 && (
-          <table className="w-full border-collapse text-[10px]" style={MONO}>
-            <thead>
-              <tr className="border-b border-[#1e2a3a] text-[#4a6080] text-[8px] tracking-[1px] uppercase">
-                <th className="py-2 px-2 text-left w-6">#</th>
-                <th className="py-2 px-2 text-left">Entry</th>
-                <th className="py-2 px-2 text-left">Exit</th>
-                <th className="py-2 px-2 text-center">Dir</th>
-                <th className="py-2 px-2 text-right">Strike</th>
-                <th className="py-2 px-2 text-right">Entry ₹</th>
-                <th className="py-2 px-2 text-right">SL ₹</th>
-                <th className="py-2 px-2 text-right">T1 ₹</th>
-                <th className="py-2 px-2 text-right">T2 ₹</th>
-                <th className="py-2 px-2 text-center">Status</th>
-                <th className="py-2 px-2 text-center">T1</th>
-                <th className="py-2 px-2 text-right">PnL ₹</th>
-                <th className="py-2 px-2 text-right">Lot P&L</th>
-                <th className="py-2 px-2 text-right">PnL%</th>
-                <th className="py-2 px-2 text-left">Concepts</th>
-                <th className="py-2 px-2 text-right">Max Pts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const pnl    = parseFloat(r.PnL) || 0;
-                const lPnL   = pnl * 65;
-                const pnlPct = parseFloat(r.PnLPct) || 0;
-                const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT";
-                const isLoss = r.Status === "SL";
-                return (
-                  <tr key={i}
-                    className="border-b border-[#0f1923] hover:bg-[#0f1923] transition-colors"
-                    style={{ background: isWin ? "#052e1622" : isLoss ? "#2d050522" : undefined }}>
-                    <td className="py-2 px-2 text-[#4a6080]">{i + 1}</td>
-                    <td className="py-2 px-2 text-[#94a3b8]">{fmtTime(r.EntryTime)}</td>
-                    <td className="py-2 px-2 text-[#94a3b8]">{fmtTime(r.ExitTime)}</td>
-                    <td className="py-2 px-2 text-center">
-                      <span className="px-1.5 py-0.5 rounded-sm text-[8px] font-bold"
-                        style={{ background: `${dirColor(r.Direction)}22`, color: dirColor(r.Direction), border: `1px solid ${dirColor(r.Direction)}44` }}>
-                        {r.Direction}
-                      </span>
-                    </td>
-                    <td className="py-2 px-2 text-right text-[#e2e8f0] font-bold">{r.Strike}</td>
-                    <td className="py-2 px-2 text-right text-[#e2e8f0]">{r.Entry}</td>
-                    <td className="py-2 px-2 text-right text-[#ef4444]">{r.SL}</td>
-                    <td className="py-2 px-2 text-right text-[#60a5fa]">{r.Target1}</td>
-                    <td className="py-2 px-2 text-right text-[#22c55e]">{r.Target2}</td>
-                    <td className="py-2 px-2 text-center">
-                      <span className="text-[8px] font-bold" style={{ color: STATUS_COLOR[r.Status] ?? "#94a3b8" }}>
-                        {statusLabel(r.Status)}
-                      </span>
-                    </td>
-                    <td className="py-2 px-2 text-center text-[11px]">
-                      {r.T1Hit === "Y" ? <span style={{ color: "#22c55e" }}>✅ {r.T1HitTime}</span> : <span style={{ color: "#ef444466" }}>—</span>}
-                    </td>
-                    <td className="py-2 px-2 text-right font-bold" style={{ color: pnlColor(pnl) }}>
-                      {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}
-                    </td>
-                    <td className="py-2 px-2 text-right font-bold" style={{ color: pnlColor(lPnL) }}>
-                      {lPnL >= 0 ? "+" : ""}₹{Math.abs(lPnL).toFixed(0)}
-                    </td>
-                    <td className="py-2 px-2 text-right" style={{ color: pnlColor(pnlPct) }}>
-                      {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
-                    </td>
-                    <td className="py-2 px-2 text-[8px] text-[#64748b]">{r.Concepts}</td>
-                    <td className="py-2 px-2 text-right text-[#94a3b8]">{r.MaxPoints || "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
+          {/* ══ DESKTOP TABLE (hidden on mobile) ══ */}
+          <div className="hidden md:flex md:flex-col flex-1 overflow-hidden">
+            <div className="flex-1 overflow-auto">
+              <div style={{ minWidth: "900px" }}>
 
-            {/* Totals row */}
-            <tfoot>
-              <tr className="border-t-2 border-[#2a3a4a] bg-[#0a1118]">
-                <td colSpan={11} className="py-2.5 px-2 text-[8px] text-[#4a6080] tracking-[1px] uppercase">
-                  Total · {rows.length} trades · Win Rate {winRate ?? "—"}%
-                </td>
-                <td className="py-2.5 px-2 text-right font-bold text-[12px]" style={{ color: pnlColor(totalPnL) }}>
-                  {totalPnL >= 0 ? "+" : ""}{totalPnL.toFixed(2)}
-                </td>
-                <td className="py-2.5 px-2 text-right font-bold text-[14px]" style={{ ...BEBAS, color: pnlColor(lotPnL) }}>
-                  {lotPnL >= 0 ? "+" : ""}₹{Math.abs(lotPnL).toFixed(0)}
-                </td>
-                <td colSpan={3} />
-              </tr>
-            </tfoot>
-          </table>
-        )}
-      </div>
+                {/* ── Table header ── */}
+                <div className="grid flex-shrink-0 border-b-2"
+                  style={{
+                    gridTemplateColumns: COLS_DESKTOP,
+                    borderColor: isDark ? "#1e2a3a" : "#cbd5e1",
+                    background:  isDark ? "#080d14"  : "#f8fafc",
+                  }}>
+                  {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS","P&L · LOT (65)","MAX PTS"].map(h => (
+                    <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase"
+                      style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{h}</div>
+                  ))}
+                </div>
+
+                {/* ── Table rows ── */}
+                <div>
+                  {rows.map((r, i) => {
+                    const pnl        = parseFloat(r.PnL) || 0;
+                    const lPnL       = pnl * LOT_QTY;
+                    const pnlPct     = parseFloat(r.PnLPct) || 0;
+                    const isTimedWin = r.Status === "TIME_PROFIT";
+                    const isTimedExit= r.Status === "TIME_EXIT";
+                    const isWin      = r.Status === "TARGET" || isTimedWin;
+                    const isLoss     = r.Status === "SL" || isTimedExit;
+                    const isEod      = r.Status === "EOD";
+                    const dc         = dirColor(r.Direction);
+                    const stColor    = isWin ? "#16a34a" : isLoss ? "#e11d48" : isEod ? "#b45309" : "#0284c7";
+                    const pnlClr     = isWin ? "#16a34a" : isLoss ? "#e11d48" : pnl >= 0 ? "#16a34a" : "#e11d48";
+                    const stIcon     = r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : isEod ? "🕐" : isTimedWin ? "⏱" : isTimedExit ? "⏱" : "⏳";
+                    const stLabel    = isTimedWin ? "60M PROFIT" : isTimedExit ? "75M EXIT" : r.Status;
+                    const t1Hit      = r.T1Hit === "Y";
+                    const t2Hit      = r.Status === "TARGET";
+                    const rowBg      = isWin
+                      ? (isDark ? "#052e16" : "#f0fdf4")
+                      : isLoss
+                      ? (isDark ? "#2d0505" : "#fff5f5")
+                      : isEod
+                      ? (isDark ? "#1c1500" : "#fefce8")
+                      : i % 2 === 0
+                      ? (isDark ? "#0a0f16" : "#fff")
+                      : (isDark ? "#0d1420" : "#fafafa");
+                    return (
+                      <div key={i}
+                        className="grid border-b transition-colors items-center"
+                        style={{
+                          gridTemplateColumns: COLS_DESKTOP,
+                          background: rowBg,
+                          borderColor: isDark ? "#0f1923" : "#f1f5f9",
+                        }}>
+
+                        {/* # */}
+                        <div className="px-2 py-2.5 text-[9px]"
+                          style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>{i + 1}</div>
+
+                        {/* TIME */}
+                        <div className="px-2 py-2.5">
+                          <div className="text-[10px] font-bold"
+                            style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>{fmtTime(r.EntryTime)}</div>
+                          <div className="text-[8px]"
+                            style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>→{fmtTime(r.ExitTime)}</div>
+                        </div>
+
+                        {/* CONCEPTS */}
+                        <div className="px-2 py-2.5 flex flex-wrap gap-1">
+                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm"
+                            style={{ ...MONO, background: `${dc}18`, color: dc, border: `1px solid ${dc}30` }}>
+                            {r.Direction}
+                          </span>
+                          {r.Concepts && r.Concepts.split(",").map((c: string) => (
+                            <span key={c} className="text-[7px] px-1 py-0.5 rounded-sm font-bold"
+                              style={{ ...MONO, background: isDark ? "#1e2a3a" : "#64748b14", color: isDark ? "#64748b" : "#64748b" }}>
+                              {c.trim()}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* STRIKE */}
+                        <div className="px-2 py-2.5">
+                          <div className="text-[11px] font-bold" style={{ ...MONO, color: dc }}>
+                            {r.Strike} {r.Direction}
+                          </div>
+                        </div>
+
+                        {/* ENTRY */}
+                        <div className="px-2 py-2.5 text-[12px] font-bold tabular-nums"
+                          style={{ ...MONO, color: dc }}>₹{r.Entry}</div>
+
+                        {/* SL */}
+                        <div className="px-2 py-2.5 text-[11px] font-bold tabular-nums text-[#e11d48]"
+                          style={MONO}>₹{r.SL}</div>
+
+                        {/* T1 */}
+                        <div className="px-2 py-2.5 text-[11px] font-bold tabular-nums text-[#b45309]"
+                          style={MONO}>₹{r.Target1}</div>
+
+                        {/* T2 */}
+                        <div className="px-2 py-2.5 text-[11px] font-bold tabular-nums text-[#16a34a]"
+                          style={MONO}>₹{r.Target2}</div>
+
+                        {/* STATUS + T1/T2 badges */}
+                        <div className="px-2 py-2.5">
+                          <div className="flex items-center gap-1 mb-0.5">
+                            <span className="text-[9px]">{stIcon}</span>
+                            <span className="text-[8px] font-bold" style={{ ...MONO, color: stColor }}>{stLabel}</span>
+                          </div>
+                          <div className="flex gap-1 mb-0.5">
+                            <span className="text-[7px] px-1 py-0.5 rounded-sm font-bold"
+                              style={{ ...MONO,
+                                background: t1Hit ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                                color:      t1Hit ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8") }}>
+                              T1{t1Hit ? "✓" : "✗"}
+                            </span>
+                            <span className="text-[7px] px-1 py-0.5 rounded-sm font-bold"
+                              style={{ ...MONO,
+                                background: t2Hit ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                                color:      t2Hit ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8") }}>
+                              T2{t2Hit ? "✓" : "✗"}
+                            </span>
+                          </div>
+                          <div className="text-[8px] font-bold" style={{ ...MONO, color: stColor }}>
+                            {fmtLotPnl(lPnL)}
+                          </div>
+                        </div>
+
+                        {/* P&L per unit + lot */}
+                        <div className="px-2 py-2.5">
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-[11px] font-bold tabular-nums"
+                              style={{ ...MONO, color: pnlClr }}>
+                              {pnl >= 0 ? "+" : ""}₹{pnl.toFixed(2)}
+                            </span>
+                            <span className="text-[7px]"
+                              style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>unit</span>
+                          </div>
+                          <div className="flex items-baseline gap-1 mt-0.5">
+                            <span className="text-[12px] font-bold tabular-nums"
+                              style={{ ...MONO, color: pnlClr }}>{fmtLotPnl(lPnL)}</span>
+                            <span className="text-[7px] font-bold"
+                              style={{ ...MONO, color: pnlClr }}>×65</span>
+                          </div>
+                          <div className="text-[8px]" style={{ ...MONO, color: pnlClr }}>
+                            {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%
+                          </div>
+                        </div>
+
+                        {/* MAX PTS */}
+                        <div className="px-2 py-2.5">
+                          {r.MaxPoints && parseFloat(r.MaxPoints) > 0 ? (
+                            <div className="text-[11px] font-bold tabular-nums text-[#7c3aed]" style={MONO}>
+                              +{r.MaxPoints}
+                            </div>
+                          ) : (
+                            <div className="text-[9px]"
+                              style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>—</div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* ── Footer stats grid ── */}
+            <div className="flex-shrink-0 border-t"
+              style={{ borderColor: isDark ? "#1e2a3a" : "#cbd5e1", background: isDark ? "#080b0f" : "#fff" }}>
+              <div className="grid grid-cols-4 sm:grid-cols-7"
+                style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#cbd5e1" }}>
+                {[
+                  { label: "TOTAL TRADES", val: `${rows.length}`,          color: isDark ? "#94a3b8" : "#475569" },
+                  { label: "TARGET HIT",   val: `${wins}`,                 color: "#16a34a" },
+                  { label: "SL HIT",       val: `${losses}`,               color: "#e11d48" },
+                  { label: "EOD / OPEN",   val: `${eod}`,                  color: "#b45309" },
+                  { label: "WIN RATE",     val: winRate ? `${winRate}%` : "—", color: winRate && Number(winRate) >= 70 ? "#16a34a" : "#e11d48" },
+                  {
+                    label: "PREMIUM P&L",
+                    val:   `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(2)} ₹`,
+                    color: pnlColor(totalPnL),
+                  },
+                  {
+                    label: "LOT P&L (65×)",
+                    val:   fmtLotPnl(lotPnL),
+                    color: pnlColor(lotPnL),
+                  },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="px-3 py-2.5"
+                    style={{ background: isDark ? "#0a0f16" : "#fff" }}>
+                    <div className="text-[7px] tracking-[1.5px] uppercase mb-1"
+                      style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{label}</div>
+                    <div className="text-[15px] font-bold leading-tight" style={{ ...MONO, color }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+export default function ResultsPage() {
+  const router = useRouter();
+
   return (
-    <div className="flex flex-col">
-      <span className="text-[8px] text-[#4a6080] tracking-[1px]">{label}</span>
-      <span className="text-[13px] font-bold" style={{ ...MONO, color: color ?? "#e2e8f0" }}>{value}</span>
+    <div className="min-h-screen flex flex-col bg-[#080b0f] text-[#e2e8f0]" style={MONO}>
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-[#1e2a3a] flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <button onClick={() => router.push("/options")}
+            className="flex items-center gap-1 text-[10px] text-[#64748b] hover:text-[#94a3b8] cursor-pointer"
+            style={MONO}>
+            <IconArrowLeft size={13} /> BACK
+          </button>
+          <span className="text-[14px] sm:text-[16px] text-[#e2e8f0] tracking-[2px] sm:tracking-[3px]"
+            style={BEBAS}>RESULTS</span>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="hidden sm:block text-[9px] text-[#4a6080]" style={MONO}>SMC ALGO · RESULTS</span>
+          <ThemeToggle />
+        </div>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <ResultsContent />
+      </div>
     </div>
   );
 }

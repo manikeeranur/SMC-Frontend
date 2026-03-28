@@ -13,6 +13,12 @@ import {
 import { smcApi, optionsApi, authApi, autoTradeApi, createWS, isDemoMode, AuthError } from "@/lib/api";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ResultsContent } from "@/app/results/page";
+import {
+  IconPower, IconCopy, IconCopyCheck, IconX,
+  IconChartCandle, IconScan, IconStar, IconStarFilled,
+  IconLayoutGrid, IconChartLine, IconFileAnalytics,
+} from "@tabler/icons-react";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
@@ -43,7 +49,7 @@ function OptionsPageInner() {
   const [loading, setLoading]         = useState(false);
   const [strikeRange] = useState<5|10|15>(15);
   const [live,   setLive]             = useState(true);
-  const [activeTab, setActiveTab]     = useState<"chain"|"smc"|"watchlist"|"ohlc">("chain");
+  const [activeTab, setActiveTab]     = useState<"chain"|"smc"|"watchlist"|"ohlc"|"results">("chain");
   const [watchlist, setWatchlist]     = useState<WatchedOption[]>([]);
   const [smcAlerts,    setSmcAlerts]    = useState<any[]>([]);
   const [smcWinRate,   setSmcWinRate]   = useState<number|null>(null);
@@ -65,6 +71,7 @@ function OptionsPageInner() {
   const [liveUser, setLiveUser]       = useState(kiteUser);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [hydrated, setHydrated]       = useState(false);
+  const [justLoggedIn, setJustLoggedIn] = useState(kiteStatus === "connected");
   const [ohlcDate, setOhlcDate]       = useState(() => new Date().toISOString().split("T")[0]);
   const [ohlcCE,   setOhlcCE]         = useState<{token:number; strike:number} | null>(null);
   const [ohlcPE,   setOhlcPE]         = useState<{token:number; strike:number} | null>(null);
@@ -81,7 +88,7 @@ function OptionsPageInner() {
       const wl = localStorage.getItem("kite_watchlist");
       if (wl) setWatchlist(JSON.parse(wl));
     } catch {}
-    const savedTab = localStorage.getItem("kite_tab") as "chain"|"smc"|"watchlist"|"ohlc" | null;
+    const savedTab = localStorage.getItem("kite_tab") as "chain"|"smc"|"watchlist"|"ohlc"|"results" | null;
     if (savedTab) setActiveTab(savedTab);
     setHydrated(true);
   }, []);
@@ -123,6 +130,7 @@ function OptionsPageInner() {
       localStorage.setItem("kite_auth", "1");
       if (kiteUser) localStorage.setItem("kite_user", kiteUser);
       window.history.replaceState({}, "", "/options");
+      setTimeout(() => setJustLoggedIn(false), 2200);
       return;
     }
     authApi.status().then(d => {
@@ -141,7 +149,10 @@ function OptionsPageInner() {
   useEffect(() => {
     if (isDemoMode || !authenticated) return;
     const ws = createWS((msg) => {
-      if (msg.type === "scan_result" && msg.active) { setActiveTab("smc"); }
+      if (msg.type === "scan_result") {
+        if (msg.active) setActiveTab("smc");
+        fetchSMCAlerts(); // refresh CMP + peakMove on every backend scan
+      }
       if (msg.type === "status") setAuthenticated(msg.authenticated);
     });
     return () => ws?.close();
@@ -335,6 +346,13 @@ function OptionsPageInner() {
     return () => clearInterval(t);
   }, [authenticated]);
 
+  // Poll SMC alerts every 1s when on SMC tab — keeps CMP + Max Points live
+  useEffect(() => {
+    if (isDemoMode || !authenticated || activeTab !== "smc") return;
+    const t = setInterval(fetchSMCAlerts, 1000);
+    return () => clearInterval(t);
+  }, [authenticated, activeTab, expiry]);
+
   // Poll auto-trade status every 10s when on SMC tab
   useEffect(() => {
     if (isDemoMode || !authenticated || activeTab !== "smc") return;
@@ -426,112 +444,143 @@ function OptionsPageInner() {
     return Math.abs(ridx - aidx) <= strikeRange;
   }) : [];
 
+  // ── Login loading overlay ───────────────────────────────────────────────────
+  if (justLoggedIn) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center" style={{ background: "#050a0f" }}>
+        {/* Grid bg */}
+        <div className="absolute inset-0 pointer-events-none" style={{
+          backgroundImage: "linear-gradient(rgba(2,132,199,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(2,132,199,0.04) 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+        }} />
+        <div className="relative flex flex-col items-center gap-6">
+          {/* Brand */}
+          <div className="text-[48px] leading-none tracking-[2px]" style={BEBAS}>
+            <span className="text-white">ALGO</span>
+            <span style={{ color: "#0284c7" }}>.</span>
+            <span style={{ color: "#ea580c" }}>BOT</span>
+          </div>
+          {/* Spinner */}
+          <div className="relative w-12 h-12">
+            <div className="absolute inset-0 rounded-full border-2 border-[#0284c7]/20" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[#0284c7] animate-spin" />
+            <div className="absolute inset-[6px] rounded-full border-2 border-transparent border-t-[#ea580c] animate-spin" style={{ animationDirection: "reverse", animationDuration: "0.6s" }} />
+          </div>
+          {/* Status */}
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="text-[10px] tracking-[3px] text-white" style={MONO}>AUTHENTICATING</div>
+            <div className="text-[8px] tracking-[2px]" style={{ ...MONO, color: "#4a6080" }}>
+              {liveUser ? `WELCOME, ${liveUser.toUpperCase()}` : "VERIFYING KITE SESSION…"}
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="w-48 h-[2px] bg-[#0f1923] overflow-hidden rounded-full">
+            <div className="h-full bg-gradient-to-r from-[#0284c7] to-[#ea580c] rounded-full animate-[progress_2.2s_ease-in-out_forwards]"
+              style={{ width: "0%", animation: "progress 2.2s ease-in-out forwards" }} />
+          </div>
+        </div>
+        <style>{`@keyframes progress { from { width:0% } to { width:100% } }`}</style>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#f0f4f8] overflow-hidden" style={{ fontFamily:"'DM Sans',sans-serif" }}>
 
       {/* ══ HEADER ══ */}
-      <header className="flex items-center justify-between px-5 h-[52px] bg-white border-b border-[#cbd5e1] flex-shrink-0">
-        <div className="flex items-center gap-5">
-          <div className="text-[20px] tracking-[3px] text-[#0284c7]" style={{ ...BEBAS, textShadow:"0 0 16px rgba(2,132,199,.15)" }}>
-            NIFTY<span className="text-[#ea580c]">.</span>OPTIONS
-          </div>
-          <StatBadge label="NIFTY" val={data?.spot.toFixed(2) ?? "—"} color="#0284c7" big />
-          <StatBadge label="ATM IV" val={data ? `${data.atmIV.toFixed(2)}%` : "—"} color="#b45309" />
-          <StatBadge label="PCR OI" val={pcrOI.toFixed(3)} color={pcrOI>=1.2?"#16a34a":pcrOI<=0.8?"#e11d48":"#b45309"} />
-          <StatBadge label="MAX PAIN" val={maxPain ? String(maxPain) : "—"} color="#ea580c" />
+      <header className="flex items-center px-3 md:px-5 h-[52px] bg-white border-b border-[#cbd5e1] flex-shrink-0 gap-3">
+        {/* Left: logo */}
+        <div className="flex items-center flex-shrink-0">
+          <img src="/logo.png" alt="ALGO.BOT" className="h-8 md:h-9 w-auto object-contain" />
         </div>
+        <div className="flex-1" />
 
-        <div className="flex items-center gap-3">
-          {isDemoMode
-            ? <Pill label="DEMO MODE" color="#ea580c" />
-            : <div className="flex items-center gap-1.5 px-2 py-1 border border-[#16a34a]/40 bg-[#16a34a]/5 rounded-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a] live-pulse" />
-                <span className="text-[9px] text-[#16a34a]" style={MONO}>KITE LIVE{liveUser ? ` · ${liveUser}` : ""}</span>
-              </div>
-          }
-
-          {loading && <span className="text-[9px] text-[#64748b]" style={MONO}>fetching...</span>}
+        {/* Right: controls (never shrinks) */}
+        <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
+          {isDemoMode && <Pill label="DEMO" color="#ea580c" />}
 
           <select value={expiry} onChange={e => setExpiry(e.target.value)}
-            className="bg-[#f1f5f9] border border-[#cbd5e1] text-[#1e293b] px-3 py-1.5 text-[11px] rounded-sm outline-none cursor-pointer" style={MONO}>
+            className="bg-[#f1f5f9] border border-[#cbd5e1] text-[#1e293b] px-2 py-1.5 text-[10px] rounded-sm outline-none cursor-pointer" style={MONO}>
             {expiries.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
 
-          <span className="text-[11px] text-[#ea580c]" style={MONO}>{data?.daysToExpiry.toFixed(1) ?? "—"}d</span>
+          <span className="hidden sm:block text-[11px] text-[#ea580c] flex-shrink-0" style={MONO}>{data?.daysToExpiry.toFixed(1) ?? "—"}d</span>
 
           <button onClick={() => setLive(v => !v)}
-            className={`flex items-center gap-2 px-3 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors ${live?"bg-[#16a34a]/10 border-[#16a34a] text-[#16a34a]":"bg-transparent border-[#cbd5e1] text-[#64748b]"}`} style={MONO}>
-            <span className={`w-1.5 h-1.5 rounded-full ${live?"bg-[#16a34a] live-pulse":"bg-[#94a3b8]"}`} />
-            {live ? "LIVE" : "PAUSED"}
+            className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors flex-shrink-0 ${live?"bg-[#16a34a]/10 border-[#16a34a] text-[#16a34a]":"bg-transparent border-[#cbd5e1] text-[#64748b]"}`} style={MONO}>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${live?"bg-[#16a34a] live-pulse":"bg-[#94a3b8]"}`} />
+            <span className="hidden sm:inline">{live ? "LIVE" : "PAUSED"}</span>
           </button>
 
-          <a href="/results"
-            className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#4a6080] text-[#94a3b8] rounded-sm cursor-pointer hover:border-[#ea580c] hover:text-[#ea580c] transition-colors"
-            style={MONO} title="View CSV Results">
-            📊 RESULTS
-          </a>
-
+          {/* Logout + ThemeToggle — mobile top right */}
           {!isDemoMode && authenticated && (
             <button onClick={handleLogout}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-[10px] border border-[#e11d48]/40 bg-[#e11d48]/5 text-[#e11d48] rounded-sm cursor-pointer hover:bg-[#e11d48]/15 transition-colors"
-              style={MONO} title="Logout from Kite">
-              ⏻ LOGOUT
+              className="md:hidden flex items-center justify-center w-7 h-7 rounded cursor-pointer text-[#e11d48]/60 hover:text-[#e11d48] transition-colors"
+              title="Logout">
+              <IconPower size={16} />
             </button>
           )}
           <ThemeToggle />
         </div>
       </header>
 
-      {/* ══ TAB BAR ══ */}
-      <div className="flex items-center gap-3 px-5 py-2 bg-white border-b border-[#cbd5e1] flex-shrink-0">
-        {(["chain","smc","watchlist","ohlc"] as const).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab as any)}
-            className={`px-3 py-1.5 text-[10px] tracking-[1px] uppercase rounded-sm border cursor-pointer transition-colors ${activeTab===tab?"bg-[#ff6b35]/20 border-[#ea580c] text-[#ea580c]":"bg-transparent border-[#cbd5e1] text-[#64748b] hover:border-[#4a6080]"}`} style={MONO}>
-            {tab==="chain"?"OPTIONS CHAIN":tab==="smc"?`SMC ALERTS (${smcAlerts.length})`:tab==="watchlist"?`WATCHLIST (${watchlist.length})`:"OHLC CSV"}
-          </button>
-        ))}
-        <div className="w-px h-4 bg-[#cbd5e1]" />
-        {/* SMC live pulse */}
-        {smcStatus?.scanActive && (
-          <div className="flex items-center gap-1.5 px-2 py-1 bg-[#7c3aed]/8 border border-[#7c3aed]/40 rounded-sm">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] live-pulse" />
-            <span className="text-[9px] text-[#7c3aed] font-bold" style={MONO}>SMC SCANNING</span>
-          </div>
-        )}
-        <div className="ml-auto flex items-center gap-2 text-[10px] text-[#64748b]" style={MONO}>
-          {smcWinRate !== null && (
-            <span className="text-[#16a34a] font-bold">{smcWinRate}% W/R</span>
-          )}
-          <span>·</span>
-          <span>{data?.updatedAt ? new Date(data.updatedAt).toLocaleTimeString("en-IN",{hour12:false}) : "—"}</span>
+      {/* ══ BODY: sidebar + content + mobile bottom nav ══ */}
+      <div className="flex flex-1 overflow-hidden">
 
-          {/* User name */}
-          {!isDemoMode && liveUser && (
-            <div className="flex items-center gap-1.5 px-2 py-1 border border-[#cbd5e1] rounded-sm bg-[#f8fafc]">
-              <span className="text-[8px] text-[#94a3b8]" style={MONO}>USER</span>
-              <span className="text-[9px] font-bold text-[#1e293b]" style={MONO}>{liveUser}</span>
-            </div>
-          )}
-
-          {/* Copy token */}
-          {!isDemoMode && authenticated && (
-            <button onClick={handleCopyToken}
-              className="flex items-center gap-1.5 px-2.5 py-1 border rounded-sm cursor-pointer transition-all text-[9px] font-bold"
+        {/* ── Desktop left sidebar (hidden on mobile) ── */}
+        <nav className="hidden md:flex flex-col items-center w-[60px] py-3 gap-1 bg-white border-r border-[#e2e8f0] flex-shrink-0">
+          {([
+            { tab:"chain",     icon:<IconLayoutGrid size={20} />,    label:"Chain" },
+            { tab:"smc",       icon:<IconScan size={20} />,          label:"SMC",    badge: smcAlerts.length || undefined },
+            { tab:"watchlist", icon:<IconStar size={20} />,          label:"Watch",  badge: watchlist.length || undefined },
+            { tab:"ohlc",      icon:<IconChartLine size={20} />,     label:"OHLC" },
+            { tab:"results",   icon:<IconFileAnalytics size={20} />, label:"Results" },
+          ] as const).map(({ tab, icon, label, badge }: any) => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              title={label}
+              className="relative flex flex-col items-center justify-center w-11 h-11 rounded-xl cursor-pointer transition-all"
               style={{
-                ...MONO,
-                borderColor: tokenCopied ? "#16a34a" : "#cbd5e1",
-                color:       tokenCopied ? "#16a34a" : "#64748b",
-                background:  tokenCopied ? "rgba(22,163,74,0.06)" : "transparent",
-              }}
-              title="Copy access token to clipboard">
-              {tokenCopied ? "✓ COPIED" : "⎘ TOKEN"}
+                background: activeTab === tab ? "rgba(234,88,12,0.10)" : "transparent",
+                color: activeTab === tab ? "#ea580c" : "#94a3b8",
+              }}>
+              {icon}
+              {badge != null && badge > 0 && (
+                <span className="absolute top-1 right-1 min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+                  style={{ background: "#ea580c", fontFamily:"'Space Mono',monospace" }}>
+                  {badge}
+                </span>
+              )}
+              {smcStatus?.scanActive && tab === "smc" && (
+                <span className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-[#7c3aed] live-pulse" />
+              )}
+            </button>
+          ))}
+
+          <div className="flex-1" />
+
+          {/* Token copy */}
+          {!isDemoMode && liveUser && (
+            <button onClick={handleCopyToken} title={tokenCopied ? "Copied!" : `Copy token (${liveUser})`}
+              className="flex flex-col items-center justify-center w-11 h-11 rounded-xl cursor-pointer transition-all"
+              style={{ color: tokenCopied ? "#16a34a" : "#94a3b8" }}>
+              {tokenCopied ? <IconCopyCheck size={20} /> : <IconCopy size={20} />}
             </button>
           )}
-        </div>
-      </div>
 
-      {/* ══ CONTENT ══ */}
-      <div className="flex-1 overflow-hidden">
+          {/* Dark theme toggle */}
+          <ThemeToggle variant="icon" />
+
+          {/* Logout */}
+          {!isDemoMode && authenticated && (
+            <button onClick={handleLogout} title="Logout"
+              className="flex flex-col items-center justify-center w-11 h-11 rounded-xl cursor-pointer transition-all text-[#e11d48]/50 hover:text-[#e11d48]">
+              <IconPower size={20} />
+            </button>
+          )}
+        </nav>
+
+        {/* ══ CONTENT ══ */}
+        <div className="flex-1 overflow-hidden">
 
         {!data && (
           <div className="flex flex-col items-center justify-center h-full gap-3">
@@ -545,41 +594,36 @@ function OptionsPageInner() {
         {/* ── OPTIONS CHAIN ── */}
         {activeTab === "chain" && data && (
           <div className="h-full flex flex-col overflow-hidden">
-            {/* ── Column headers: responsive — mobile:[+CE LTP STRIKE PE LTP +PE] md+:[+OI] xl+:[+VOL+RSI] */}
-            <div className="chain-grid flex-shrink-0 border-b border-[#cbd5e1] bg-white">
-              <div className="py-2.5 bg-[#e8f4ff] border-r border-[#cbd5e1]" />
-              <div className="chain-col-oi px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff]" style={MONO}>
-                <span className="text-[#0284c7]/50">CE </span>OI
+            {/* ── Desktop column headers (md+) */}
+            <div className="hidden md:block flex-shrink-0 border-b border-[#cbd5e1] bg-white">
+              <div className="chain-grid">
+                <div className="py-2.5 bg-[#e8f4ff] border-r border-[#cbd5e1]" />
+                <div className="chain-col-oi px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff]" style={MONO}>
+                  <span className="text-[#0284c7]/50">CE </span>OI
+                </div>
+                <div className="px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff] border-r border-[#cbd5e1]" style={MONO}>
+                  <span className="text-[#0284c7]/50">CE </span>LTP
+                </div>
+                <div className="px-2 py-2.5 text-center text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase bg-[#e8eef5] border-x border-[#cbd5e1]" style={MONO}>
+                  STRIKE
+                </div>
+                <div className="px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3] border-l border-[#cbd5e1]" style={MONO}>
+                  <span className="text-[#e11d48]/50">PE </span>LTP
+                </div>
+                <div className="chain-col-oi px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3]" style={MONO}>
+                  <span className="text-[#e11d48]/50">PE </span>OI
+                </div>
+                <div className="py-2.5 bg-[#fff0f3] border-l border-[#cbd5e1]" />
               </div>
-              <div className="px-3 py-2.5 text-right text-[8px] font-bold tracking-[1.5px] text-[#0284c7] uppercase bg-[#e8f4ff] border-r border-[#cbd5e1]" style={MONO}>
-                <span className="text-[#0284c7]/50">CE </span>LTP
-              </div>
-              <div className="px-2 py-2.5 text-center text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase bg-[#e8eef5] border-x border-[#cbd5e1]" style={MONO}>
-                STRIKE
-              </div>
-              <div className="px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3] border-l border-[#cbd5e1]" style={MONO}>
-                <span className="text-[#e11d48]/50">PE </span>LTP
-              </div>
-              <div className="chain-col-oi px-3 py-2.5 text-left text-[8px] font-bold tracking-[1.5px] text-[#e11d48] uppercase bg-[#fff0f3]" style={MONO}>
-                <span className="text-[#e11d48]/50">PE </span>OI
-              </div>
-              <div className="py-2.5 bg-[#fff0f3] border-l border-[#cbd5e1]" />
+            </div>
+            {/* ── Mobile column headers (mobile only) */}
+            <div className="md:hidden flex-shrink-0 grid grid-cols-[1fr_56px_1fr] border-b border-[#cbd5e1] bg-white text-[7px] font-bold tracking-[1.5px] uppercase" style={MONO}>
+              <div className="px-3 py-2 text-center text-[#0284c7] bg-[#e8f4ff]">CE</div>
+              <div className="py-2 text-center text-[#64748b] bg-[#e8eef5]">STRIKE</div>
+              <div className="px-3 py-2 text-center text-[#e11d48] bg-[#fff0f3]">PE</div>
             </div>
             <div className="flex-1 overflow-y-auto">
               {filteredRows.map(row => <ChainRow key={row.strike} row={row} atmStrike={atmStrike} onAddWatch={addToWatch} addedTokens={watchlistTokens} expiry={expiry} onOpenChart={(_token, strike, type, _sym) => { window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, strike, type)}`, "_blank"); }} />)}
-            </div>
-            <div className="flex-shrink-0 grid grid-cols-4 border-t border-[#cbd5e1]" style={{ gap:"1px", background: isDark ? "#1e2a3a" : "#cbd5e1" }}>
-              {[
-                { label:"TOTAL CE OI", val:fmtOI(totalCEOI), color:"#0284c7" },
-                { label:"TOTAL PE OI", val:fmtOI(totalPEOI), color:"#e11d48" },
-                { label:"PCR VOL",     val:pcrVol.toFixed(3), color:pcrVol>=1.2?"#16a34a":pcrVol<=0.8?"#e11d48":"#b45309" },
-                { label:"PCR OI",      val:pcrOI.toFixed(3),  color:pcrOI>=1.2?"#16a34a":pcrOI<=0.8?"#e11d48":"#b45309" },
-              ].map(({label,val,color})=>(
-                <div key={label} className="bg-white px-4 py-2.5">
-                  <div className="text-[8px] tracking-[1.5px] text-[#64748b] uppercase mb-1" style={MONO}>{label}</div>
-                  <div className="text-[14px] font-bold" style={{...MONO,color}}>{val}</div>
-                </div>
-              ))}
             </div>
           </div>
         )}
@@ -611,7 +655,7 @@ function OptionsPageInner() {
 
         {/* ── WATCHLIST ── */}
         {activeTab === "watchlist" && (
-          <div className="h-full overflow-y-auto px-4 py-4">
+          <div className="h-full overflow-y-auto px-3 py-3">
             {watchlist.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
                 <div className="text-[40px] text-[#cbd5e1]">◈</div>
@@ -620,22 +664,14 @@ function OptionsPageInner() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2 pb-4">
-                {watchlist.map((w, idx) => (
-                  <div key={w.leg.token}
-                    draggable
-                    onDragStart={() => handleDragStart(idx)}
-                    onDragOver={e => handleDragOver(e, idx)}
-                    onDrop={() => handleDrop(idx)}
-                    onDragLeave={() => setDragOver(null)}
-                    style={{opacity: dragIdxRef.current===idx?0.4:1,
-                      outline: dragOver===idx?"2px dashed #0284c7":"none", borderRadius:4}}>
-                    <WatchlistRow
-                      watched={w}
-                      candles3m={candles3m[w.leg.token] ?? []}
-                      expiry={expiry}
-                      onRemove={() => removeWatch(w.leg.token)} />
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 pb-4">
+                {watchlist.map((w) => (
+                  <WatchlistRow
+                    key={w.leg.token}
+                    watched={w}
+                    candles3m={candles3m[w.leg.token] ?? []}
+                    expiry={expiry}
+                    onRemove={() => removeWatch(w.leg.token)} />
                 ))}
               </div>
             )}
@@ -652,7 +688,56 @@ function OptionsPageInner() {
             busy={ohlcBusy} setBusy={setOhlcBusy}
           />
         )}
+
+        {/* ── RESULTS (embedded component) ── */}
+        {activeTab === "results" && (
+          <ResultsContent />
+        )}
+        </div>
       </div>
+
+      {/* ── Mobile bottom nav (hidden on md+) ── */}
+      <nav className="md:hidden flex items-center justify-around h-14 bg-white border-t border-[#e2e8f0] flex-shrink-0">
+        <button onClick={() => setActiveTab("chain")}
+          className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "chain" ? "#ea580c" : "#94a3b8" }}>
+          <IconLayoutGrid size={22} />
+          <span className="text-[8px]" style={MONO}>Chain</span>
+        </button>
+        <button onClick={() => setActiveTab("smc")}
+          className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "smc" ? "#ea580c" : "#94a3b8" }}>
+          <IconScan size={22} />
+          <span className="text-[8px]" style={MONO}>SMC</span>
+          {smcAlerts.length > 0 && (
+            <span className="absolute top-1.5 right-[calc(50%-18px)] min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+              style={{ background: "#ea580c" }}>{smcAlerts.length}</span>
+          )}
+        </button>
+        <button onClick={() => setActiveTab("watchlist")}
+          className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "watchlist" ? "#ea580c" : "#94a3b8" }}>
+          <IconStar size={22} />
+          <span className="text-[8px]" style={MONO}>Watch</span>
+          {watchlist.length > 0 && (
+            <span className="absolute top-1.5 right-[calc(50%-18px)] min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+              style={{ background: "#ea580c" }}>{watchlist.length}</span>
+          )}
+        </button>
+        <button onClick={() => setActiveTab("ohlc")}
+          className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "ohlc" ? "#ea580c" : "#94a3b8" }}>
+          <IconChartLine size={22} />
+          <span className="text-[8px]" style={MONO}>OHLC</span>
+        </button>
+        <button onClick={() => setActiveTab("results")}
+          className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "results" ? "#ea580c" : "#94a3b8" }}>
+          <IconFileAnalytics size={22} />
+          <span className="text-[8px]" style={MONO}>Results</span>
+        </button>
+      </nav>
+
     </div>
   );
 }
@@ -698,18 +783,8 @@ function sensibullSym(expiry: string, strike: number, type: "CE"|"PE") {
   return `NIFTY${yy}${m}${dd}${strike}${type}`;
 }
 
-// ─── CANDLE ICON ──────────────────────────────────────────────────────────────
 function CandleIcon({ color }: { color: string }) {
-  return (
-    <svg width="11" height="12" viewBox="0 0 11 12" fill={color}>
-      <rect x="0.5" y="7"   width="2" height="4"   rx="0.5" />
-      <rect x="0.5" y="5"   width="2" height="1.5" rx="0.5" opacity="0.4" />
-      <rect x="4.5" y="2.5" width="2" height="7"   rx="0.5" />
-      <rect x="4.5" y="0.5" width="2" height="1.5" rx="0.5" opacity="0.4" />
-      <rect x="8.5" y="4.5" width="2" height="6"   rx="0.5" />
-      <rect x="8.5" y="3"   width="2" height="1.5" rx="0.5" opacity="0.4" />
-    </svg>
-  );
+  return <IconChartCandle size={14} color={color} />;
 }
 
 // ─── CHAIN ROW ────────────────────────────────────────────────────────────────
@@ -722,87 +797,155 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
   const rowBg = isATM ? "bg-[#eff6ff]" : "bg-white hover:bg-[#f8fafc]";
   const ceAdded = addedTokens.has(ce.token);
   const peAdded = addedTokens.has(pe.token);
+
   return (
-    <div className={`chain-grid border-b border-[#f1f5f9] transition-colors ${rowBg}`}>
+    <>
+      {/* ── MOBILE CARD (hidden md+) ── */}
+      <div className={`md:hidden border-b border-[#f1f5f9] transition-colors ${rowBg}`}>
+        <div className="grid grid-cols-[1fr_56px_1fr]">
 
-      {/* + CE */}
-      <div className="flex items-center justify-center bg-[#f8fbff]">
-        <button onClick={() => onAddWatch(ce)} title={ceAdded ? `Remove CE ${strike}` : `Add CE ${strike} to watchlist`}
-          className={`w-6 h-6 rounded text-[11px] font-bold border cursor-pointer transition-all
-            ${ceAdded?"bg-[#16a34a] border-[#16a34a] text-white":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30 hover:bg-[#0284c7]/25"}`}>
-          {ceAdded ? "✓" : "+"}
-        </button>
-      </div>
-
-      {/* CE OI — bar from right toward strike — md+ only */}
-      <div className="chain-col-oi px-3 py-2 text-right relative overflow-hidden bg-[#f8fbff]">
-        <div className="absolute right-0 top-0 bottom-0" style={{ width:`${row.ceOIBar}%`, background:"rgba(2,132,199,0.10)" }} />
-        <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(ce.oi)}</span>
-      </div>
-
-      {/* CE LTP + chart icon */}
-      <div className="px-2 py-2 text-right border-r border-[#e2e8f0] group">
-        <div className="flex items-center justify-end gap-1.5">
-          <button onClick={() => onOpenChart(ce.token, strike, "CE", tvSymbol(expiry, strike, "CE"))}
-            title={`Chart ${strike} CE`}
-            className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#0284c7]/15 text-[#0284c7] cursor-pointer">
-            <CandleIcon color="#0284c7" />
-          </button>
-          <div>
-            <div className={`text-[13px] font-bold tabular-nums leading-tight
-              ${ce.ltp>=200&&ce.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
-              ₹{ce.ltp.toFixed(2)}
+          {/* CE side */}
+          <div className="px-3 py-2.5 bg-[#f8fbff] flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className={`text-[12px] font-bold tabular-nums ${ce.ltp>=200&&ce.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
+                ₹{ce.ltp.toFixed(2)}
+              </span>
+              <button onClick={() => onAddWatch(ce)}
+                className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0
+                  ${ceAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30"}`}>
+                {ceAdded ? <IconStarFilled size={10} /> : <IconStar size={10} />}
+              </button>
             </div>
-            <div className={`text-[8px] ${ce.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
+            <div className={`text-[9px] ${ce.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
               {ce.ltpChange>=0?"▲":"▼"}{Math.abs(ce.ltpChange).toFixed(2)}
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* STRIKE */}
-      <div className={`py-2 text-center border-x border-[#e2e8f0] flex flex-col items-center justify-center
-        ${isATM ? "bg-[#dbeafe]" : "bg-[#f8fafc]"}`}>
-        <div className={`text-[12px] font-bold tabular-nums leading-none
-          ${isATM ? "text-[#0284c7]" : "text-[#1e293b]"}`} style={MONO}>{strike}</div>
-        {isATM && <div className="text-[6px] text-[#0284c7]/60 tracking-[1px] mt-0.5 font-bold" style={MONO}>ATM</div>}
-      </div>
-
-      {/* PE LTP + chart icon */}
-      <div className="px-2 py-2 text-left border-l border-[#e2e8f0] group">
-        <div className="flex items-center gap-1.5">
-          <div>
-            <div className={`text-[13px] font-bold tabular-nums leading-tight
-              ${pe.ltp>=200&&pe.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
-              ₹{pe.ltp.toFixed(2)}
+            <div className="flex items-center justify-between">
+              <span className="text-[8px] text-[#94a3b8]" style={MONO}>{fmtOI(ce.oi)}</span>
+              <button onClick={() => onOpenChart(ce.token, strike, "CE", tvSymbol(expiry, strike, "CE"))}
+                className="w-5 h-5 flex items-center justify-center rounded text-[#0284c7] opacity-50 cursor-pointer">
+                <CandleIcon color="#0284c7" />
+              </button>
             </div>
-            <div className={`text-[8px] ${pe.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
+          </div>
+
+          {/* Strike center */}
+          <div className={`flex flex-col items-center justify-center border-x border-[#e2e8f0] py-2 ${isATM?"bg-[#dbeafe]":"bg-[#f8fafc]"}`}>
+            <div className={`text-[11px] font-bold tabular-nums leading-none ${isATM?"text-[#0284c7]":"text-[#1e293b]"}`} style={MONO}>{strike}</div>
+            {isATM && <div className="text-[6px] text-[#0284c7]/60 tracking-[1px] mt-0.5 font-bold" style={MONO}>ATM</div>}
+          </div>
+
+          {/* PE side */}
+          <div className="px-3 py-2.5 bg-[#fff8fa] flex flex-col gap-1 items-end">
+            <div className="flex items-center justify-between w-full">
+              <button onClick={() => onAddWatch(pe)}
+                className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0
+                  ${peAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30"}`}>
+                {peAdded ? <IconStarFilled size={10} /> : <IconStar size={10} />}
+              </button>
+              <span className={`text-[12px] font-bold tabular-nums ${pe.ltp>=200&&pe.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
+                ₹{pe.ltp.toFixed(2)}
+              </span>
+            </div>
+            <div className={`text-[9px] ${pe.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
               {pe.ltpChange>=0?"▲":"▼"}{Math.abs(pe.ltpChange).toFixed(2)}
             </div>
+            <div className="flex items-center justify-between w-full">
+              <button onClick={() => onOpenChart(pe.token, strike, "PE", tvSymbol(expiry, strike, "PE"))}
+                className="w-5 h-5 flex items-center justify-center rounded text-[#e11d48] opacity-50 cursor-pointer">
+                <CandleIcon color="#e11d48" />
+              </button>
+              <span className="text-[8px] text-[#94a3b8]" style={MONO}>{fmtOI(pe.oi)}</span>
+            </div>
           </div>
-          <button onClick={() => onOpenChart(pe.token, strike, "PE", tvSymbol(expiry, strike, "PE"))}
-            title={`Chart ${strike} PE`}
-            className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#e11d48]/15 text-[#e11d48] cursor-pointer">
-            <CandleIcon color="#e11d48" />
-          </button>
+
         </div>
       </div>
 
-      {/* PE OI — bar from left toward strike — md+ only */}
-      <div className="chain-col-oi px-3 py-2 text-left relative overflow-hidden bg-[#fff8fa]">
-        <div className="absolute left-0 top-0 bottom-0" style={{ width:`${row.peOIBar}%`, background:"rgba(225,29,72,0.08)" }} />
-        <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(pe.oi)}</span>
-      </div>
+      {/* ── DESKTOP TABLE ROW (hidden on mobile) ── */}
+      <div className="hidden md:block">
+      <div className={`chain-grid border-b border-[#f1f5f9] transition-colors ${rowBg}`}>
 
-      {/* + PE */}
-      <div className="flex items-center justify-center bg-[#fff8fa]">
-        <button onClick={() => onAddWatch(pe)} title={peAdded ? `Remove PE ${strike}` : `Add PE ${strike} to watchlist`}
-          className={`w-6 h-6 rounded text-[11px] font-bold border cursor-pointer transition-all
-            ${peAdded?"bg-[#16a34a] border-[#16a34a] text-white":"bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30 hover:bg-[#e11d48]/25"}`}>
-          {peAdded ? "✓" : "+"}
-        </button>
+        {/* + CE */}
+        <div className="flex items-center justify-center bg-[#f8fbff]">
+          <button onClick={() => onAddWatch(ce)} title={ceAdded ? `Remove CE ${strike}` : `Add CE ${strike} to watchlist`}
+            className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all
+              ${ceAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30 hover:bg-[#0284c7]/20"}`}>
+            {ceAdded ? <IconStarFilled size={11} /> : <IconStar size={11} />}
+          </button>
+        </div>
+
+        {/* CE OI */}
+        <div className="chain-col-oi px-3 py-2 text-right relative overflow-hidden bg-[#f8fbff]">
+          <div className="absolute right-0 top-0 bottom-0" style={{ width:`${row.ceOIBar}%`, background:"rgba(2,132,199,0.10)" }} />
+          <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(ce.oi)}</span>
+        </div>
+
+        {/* CE LTP + chart icon */}
+        <div className="px-2 py-2 text-right border-r border-[#e2e8f0] group">
+          <div className="flex items-center justify-end gap-1.5">
+            <button onClick={() => onOpenChart(ce.token, strike, "CE", tvSymbol(expiry, strike, "CE"))}
+              title={`Chart ${strike} CE`}
+              className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#0284c7]/15 text-[#0284c7] cursor-pointer">
+              <CandleIcon color="#0284c7" />
+            </button>
+            <div>
+              <div className={`text-[13px] font-bold tabular-nums leading-tight
+                ${ce.ltp>=200&&ce.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
+                ₹{ce.ltp.toFixed(2)}
+              </div>
+              <div className={`text-[8px] ${ce.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
+                {ce.ltpChange>=0?"▲":"▼"}{Math.abs(ce.ltpChange).toFixed(2)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* STRIKE */}
+        <div className={`py-2 text-center border-x border-[#e2e8f0] flex flex-col items-center justify-center
+          ${isATM ? "bg-[#dbeafe]" : "bg-[#f8fafc]"}`}>
+          <div className={`text-[12px] font-bold tabular-nums leading-none
+            ${isATM ? "text-[#0284c7]" : "text-[#1e293b]"}`} style={MONO}>{strike}</div>
+          {isATM && <div className="text-[6px] text-[#0284c7]/60 tracking-[1px] mt-0.5 font-bold" style={MONO}>ATM</div>}
+        </div>
+
+        {/* PE LTP + chart icon */}
+        <div className="px-2 py-2 text-left border-l border-[#e2e8f0] group">
+          <div className="flex items-center gap-1.5">
+            <div>
+              <div className={`text-[13px] font-bold tabular-nums leading-tight
+                ${pe.ltp>=200&&pe.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
+                ₹{pe.ltp.toFixed(2)}
+              </div>
+              <div className={`text-[8px] ${pe.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
+                {pe.ltpChange>=0?"▲":"▼"}{Math.abs(pe.ltpChange).toFixed(2)}
+              </div>
+            </div>
+            <button onClick={() => onOpenChart(pe.token, strike, "PE", tvSymbol(expiry, strike, "PE"))}
+              title={`Chart ${strike} PE`}
+              className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#e11d48]/15 text-[#e11d48] cursor-pointer">
+              <CandleIcon color="#e11d48" />
+            </button>
+          </div>
+        </div>
+
+        {/* PE OI */}
+        <div className="chain-col-oi px-3 py-2 text-left relative overflow-hidden bg-[#fff8fa]">
+          <div className="absolute left-0 top-0 bottom-0" style={{ width:`${row.peOIBar}%`, background:"rgba(225,29,72,0.08)" }} />
+          <span className="text-[11px] tabular-nums relative z-10 text-[#475569]" style={MONO}>{fmtOI(pe.oi)}</span>
+        </div>
+
+        {/* + PE */}
+        <div className="flex items-center justify-center bg-[#fff8fa]">
+          <button onClick={() => onAddWatch(pe)} title={peAdded ? `Remove PE ${strike}` : `Add PE ${strike} to watchlist`}
+            className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all
+              ${peAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30 hover:bg-[#e11d48]/20"}`}>
+            {peAdded ? <IconStarFilled size={11} /> : <IconStar size={11} />}
+          </button>
+        </div>
+
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1578,71 +1721,67 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
     <div className="h-full flex flex-col overflow-hidden">
 
       {/* ── Mode switcher + action bar ── */}
-      <div className="flex items-center gap-3 px-5 py-2.5 bg-white border-b border-[#cbd5e1] flex-shrink-0">
+      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 bg-white border-b border-[#cbd5e1] flex-shrink-0 overflow-x-auto">
 
         {/* LIVE / BACKTEST toggle */}
-        <div className="flex border border-[#cbd5e1] rounded-sm overflow-hidden">
+        <div className="flex border border-[#cbd5e1] rounded-sm overflow-hidden flex-shrink-0">
           {(["live","backtest"] as const).map(m => (
             <button key={m} onClick={() => setMode(m)}
-              className={`px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors ${mode===m?"text-white":"text-[#64748b] hover:bg-[#f1f5f9]"}`}
+              className={`px-2 sm:px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors whitespace-nowrap ${mode===m?"text-white":"text-[#64748b] hover:bg-[#f1f5f9]"}`}
               style={{...MONO, background:mode===m?(m==="live"?"#7c3aed":"#ea580c"):"transparent"}}>
-              {m === "live" ? "▶ LIVE" : "◉ BACKTEST"}
+              {m === "live" ? "▶ LIVE" : "◉ TEST"}
             </button>
           ))}
         </div>
 
         {mode === "live" ? (
           <>
-            {/* Live scan status */}
-            {smcStatus?.scanActive ? (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#7c3aed]/8 border border-[#7c3aed]/40 rounded-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#7c3aed] live-pulse" />
-                <span className="text-[9px] font-bold text-[#7c3aed]" style={MONO}>SCANNING LIVE</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#f1f5f9] border border-[#cbd5e1] rounded-sm">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#94a3b8]" />
-                <span className="text-[9px] text-[#64748b]" style={MONO}>{authenticated ? "MARKET CLOSED" : "NOT AUTHENTICATED"}</span>
-              </div>
-            )}
+            {/* Live scan status — dot only on mobile */}
+            <div className="flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
+              style={{ background: smcStatus?.scanActive ? "rgba(124,58,237,0.05)" : "#f1f5f9", borderColor: smcStatus?.scanActive ? "rgba(124,58,237,0.4)" : "#cbd5e1" }}>
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${smcStatus?.scanActive ? "bg-[#7c3aed] live-pulse" : "bg-[#94a3b8]"}`} />
+              <span className="hidden sm:block text-[9px] font-bold whitespace-nowrap"
+                style={{...MONO, color: smcStatus?.scanActive ? "#7c3aed" : "#64748b"}}>
+                {smcStatus?.scanActive ? "SCANNING" : authenticated ? "CLOSED" : "NOT AUTH"}
+              </span>
+            </div>
             {wr !== null && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 border rounded-sm"
+              <div className="hidden md:flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
                 style={{
                   background: Number(wr)>=70 ? (isDark?"#052e16":"#f0fdf4") : (isDark?"#2d0505":"#fef2f2"),
                   borderColor: Number(wr)>=70 ? (isDark?"#166534":"#bbf7d0") : (isDark?"#991b1b":"#fecaca"),
                 }}>
-                <span className="text-[9px] font-bold" style={{...MONO, color:Number(wr)>=70?"#16a34a":"#e11d48"}}>
-                  {wr}% W/R  {wins}W/{losses}L
+                <span className="text-[9px] font-bold whitespace-nowrap" style={{...MONO, color:Number(wr)>=70?"#16a34a":"#e11d48"}}>
+                  {wr}% · {wins}W/{losses}L
                 </span>
               </div>
             )}
-            <div className="text-[9px] text-[#64748b]" style={MONO}>
+            <div className="hidden sm:block text-[9px] text-[#64748b] whitespace-nowrap flex-shrink-0" style={MONO}>
               <span className="text-[#0284c7] font-bold">{active}</span> active · {alerts.length} total
-              {smcStatus?.lastScanAt && ` · last ${new Date(smcStatus.lastScanAt).toLocaleTimeString("en-IN",{hour12:false})}`}
             </div>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
               {/* AUTO TRADE START / STOP */}
               {authenticated && !isDemoMode && (
                 <button onClick={onToggleAutoTrade}
-                  className="px-3 py-1.5 text-[9px] font-bold tracking-[1.5px] rounded-sm border cursor-pointer transition-all"
+                  className="px-2 sm:px-3 py-1.5 text-[9px] font-bold rounded-sm border cursor-pointer transition-all whitespace-nowrap"
                   style={{
                     ...MONO,
                     background: autoTradeEnabled ? "#16a34a" : (isDark ? "#0a0f16" : "#f8fafc"),
                     borderColor: autoTradeEnabled ? "#16a34a" : "#e11d48",
                     color: autoTradeEnabled ? "#fff" : "#e11d48",
                   }}>
-                  {autoTradeEnabled ? "⏹ STOP AUTO TRADE" : "▶ START AUTO TRADE"}
+                  {autoTradeEnabled ? "⏹ STOP" : "▶ AUTO"}
                 </button>
               )}
               <button onClick={onTrigger} disabled={busy || !authenticated || isDemoMode}
-                className="px-3 py-1.5 text-[9px] font-bold tracking-[1.5px] rounded-sm border cursor-pointer disabled:opacity-40"
+                className="px-2 sm:px-3 py-1.5 text-[9px] font-bold rounded-sm border cursor-pointer disabled:opacity-40 whitespace-nowrap"
                 style={{...MONO, background:"#7c3aed18", borderColor:"#7c3aed", color:"#7c3aed"}}>
-                {busy ? "SCANNING…" : "▶ SCAN NOW"}
+                {busy ? "…" : "▶ SCAN"}
               </button>
               {alerts.length > 0 && (
                 <button onClick={onClear}
-                  className="px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8]" style={MONO}>
-                  CLEAR
+                  className="px-2 sm:px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8] whitespace-nowrap" style={MONO}>
+                  CLR
                 </button>
               )}
             </div>
@@ -1650,38 +1789,35 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
         ) : (
           /* Backtest date picker */
           <>
-            <div className="flex items-center gap-2">
-              <span className="text-[9px] text-[#64748b] tracking-[1px]" style={MONO}>DATE</span>
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              <span className="hidden sm:block text-[9px] text-[#64748b] tracking-[1px]" style={MONO}>DATE</span>
               <input type="date" value={histDate}
                 max={(() => { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; })()}
                 onChange={e => onHistDateChange(e.target.value)}
-                className="border border-[#cbd5e1] rounded-sm px-2 py-1 text-[11px] bg-white cursor-pointer outline-none" style={MONO} />
+                className="border border-[#cbd5e1] rounded-sm px-2 py-1 text-[10px] sm:text-[11px] bg-white cursor-pointer outline-none" style={MONO} />
               <button onClick={onHistScan} disabled={histBusy || !authenticated || isDemoMode || !expiry}
-                className="px-3 py-1.5 text-[9px] font-bold tracking-[1px] rounded-sm border cursor-pointer disabled:opacity-40 transition-colors"
+                className="px-2 sm:px-3 py-1.5 text-[9px] font-bold rounded-sm border cursor-pointer disabled:opacity-40 transition-colors whitespace-nowrap"
                 style={{...MONO, background:"#ea580c18", borderColor:"#ea580c", color:"#ea580c"}}>
-                {histBusy ? "SCANNING…" : "◉ RUN BACKTEST"}
+                {histBusy ? "…" : "◉ RUN"}
               </button>
-              {histErr && <span className="text-[9px] text-[#e11d48]" style={MONO}>{histErr}</span>}
+              {histErr && <span className="text-[9px] text-[#e11d48] whitespace-nowrap" style={MONO}>{histErr}</span>}
             </div>
             {histResults !== null && wr !== null && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 border rounded-sm"
+              <div className="hidden md:flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
                 style={{
                   background: Number(wr)>=70 ? (isDark?"#052e16":"#f0fdf4") : (isDark?"#2d0505":"#fef2f2"),
                   borderColor: Number(wr)>=70 ? (isDark?"#166534":"#bbf7d0") : (isDark?"#991b1b":"#fecaca"),
                 }}>
-                <span className="text-[9px] font-bold" style={{...MONO, color:Number(wr)>=70?"#16a34a":"#e11d48"}}>
-                  {histDate} · {wr}% W/R  {wins}W/{losses}L{eod>0?` · ${eod} EOD`:""}
+                <span className="text-[9px] font-bold whitespace-nowrap" style={{...MONO, color:Number(wr)>=70?"#16a34a":"#e11d48"}}>
+                  {wr}% · {wins}W/{losses}L{eod>0?` · ${eod}E`:""}
                 </span>
               </div>
             )}
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-[8px] text-[#94a3b8]" style={MONO}>
-                Expiry: {expiry} · min 2 SMC concepts · 09:21–15:30
-              </span>
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
               {histResults !== null && (
                 <button onClick={onHistClear}
-                  className="px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8]" style={MONO}>
-                  CLEAR
+                  className="px-2 sm:px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8] whitespace-nowrap" style={MONO}>
+                  CLR
                 </button>
               )}
             </div>
@@ -1714,7 +1850,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       )}
 
       {/* ── Concept legend ── */}
-      <div className="flex items-center gap-2 px-5 py-1.5 bg-[#fafbfc] border-b border-[#e2e8f0] flex-shrink-0 flex-wrap">
+      <div className="hidden md:flex items-center gap-2 px-5 py-1.5 bg-[#fafbfc] border-b border-[#e2e8f0] flex-shrink-0 flex-wrap">
         <span className="text-[7px] text-[#94a3b8] tracking-[1px]" style={MONO}>SMC CONCEPTS:</span>
         {Object.entries(conceptColor).map(([k,c]) => (
           <span key={k} className="text-[8px] px-1.5 py-0.5 rounded-sm font-bold"
@@ -1723,7 +1859,207 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
         <span className="text-[7px] text-[#94a3b8] ml-2" style={MONO}>· min 2 concepts · LTP ₹200–₹300 · SL −12% · Target +24% · entry ≥ 09:21</span>
       </div>
 
-      {/* ── Table header ── */}
+      {/* ── Empty state (outside scroll container so it centers correctly) ── */}
+      {tableAlerts.length === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-4">
+          <IconScan size={48} className="text-[#e2e8f0]" />
+          <p className="text-[11px] text-[#94a3b8] text-center" style={MONO}>
+            {mode === "backtest"
+              ? "Select a date and tap RUN to analyse a past day"
+              : !authenticated
+              ? "Connect Kite to start SMC scanning"
+              : isDemoMode
+              ? "SMC scanner requires live data"
+              : "No alerts yet · Scanner runs every minute from 09:21 AM"}
+          </p>
+          {mode === "live" && authenticated && !isDemoMode && (
+            <button onClick={onTrigger} disabled={busy}
+              className="px-5 py-2.5 text-[10px] font-bold tracking-[2px] rounded-sm border cursor-pointer disabled:opacity-40"
+              style={{...MONO, background:"#7c3aed18", borderColor:"#7c3aed", color:"#7c3aed"}}>
+              {busy ? "SCANNING…" : "▶ RUN SMC SCAN NOW"}
+            </button>
+          )}
+          {mode === "backtest" && authenticated && !isDemoMode && (
+            <button onClick={onHistScan} disabled={histBusy}
+              className="px-5 py-2.5 text-[10px] font-bold tracking-[2px] rounded-sm border cursor-pointer disabled:opacity-40"
+              style={{...MONO, background:"#ea580c18", borderColor:"#ea580c", color:"#ea580c"}}>
+              {histBusy ? "SCANNING…" : "◉ RUN BACKTEST NOW"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Table header + body ── */}
+      {tableAlerts.length > 0 && (
+      <>
+      {/* ── MOBILE CARDS (md+ hidden) ── */}
+      <div className="md:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
+        {tableAlerts.map((a, idx) => {
+          const misCE   = a.direction === "CE";
+          const misWin  = a.status === "TARGET" || a.status === "TIME_PROFIT";
+          const misLoss = a.status === "SL" || a.status === "TIME_EXIT";
+          const mdirClr = misCE ? "#0284c7" : "#e11d48";
+          const mstClr  = misWin ? "#16a34a" : misLoss ? "#e11d48" : a.status === "EOD" ? "#b45309" : "#0284c7";
+          const mpnlUp  = (a.currentPnL ?? 0) >= 0;
+          const mpnlClr = misWin ? "#16a34a" : misLoss ? "#e11d48" : mpnlUp ? "#16a34a" : "#e11d48";
+          const mstIco  = a.status === "TARGET" ? "🎯" : a.status === "SL" ? "🛑" : a.status === "EOD" ? "🕐" : "⏳";
+          const mstLbl  = a.status === "TIME_PROFIT" ? "60M WIN" : a.status === "TIME_EXIT" ? "75M EXIT" : a.status;
+          const mSl     = a.rr?.sl ?? 0;
+          const mT2     = a.rr?.target2 ?? 0;
+          const mLtp    = a.leg?.ltp ?? a.rr?.entry ?? 0;
+          const mFill   = (mT2 - mSl) > 0 ? Math.min(Math.max(((mLtp - mSl) / (mT2 - mSl)) * 100, 0), 100) : 50;
+          const mT1Pct  = (mT2 - mSl) > 0 ? Math.min((((a.rr?.target1 ?? 0) - mSl) / (mT2 - mSl)) * 100, 100) : 67;
+          return (
+            <div key={a.id} className="rounded-xl overflow-hidden"
+              style={{
+                background: isDark ? "#0d1420" : "#fff",
+                border: `1px solid ${misWin ? "#22c55e33" : misLoss ? "#ef444433" : isDark ? "#1e2a3a" : "#e2e8f0"}`,
+                borderLeft: `3px solid ${misWin ? "#22c55e" : misLoss ? "#e11d48" : a.status === "ACTIVE" ? mdirClr : "#334155"}`,
+              }}>
+              {/* Top section */}
+              <div className="px-3 py-3 flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                  {/* Direction badge */}
+                  <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0"
+                    style={{ background: `${mdirClr}18`, border: `1.5px solid ${mdirClr}40` }}>
+                    <span className="text-[7px] font-bold" style={{ ...MONO, color: "#64748b" }}>NI</span>
+                    <span className="text-[12px] font-bold" style={{ ...BEBAS, color: mdirClr }}>{a.direction}</span>
+                  </div>
+                  {/* Instrument + time + concepts */}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[15px] font-bold leading-tight" style={{ ...BEBAS, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                      NIFTY {a.strike} {a.direction === "CE" ? "Call" : "Put"}
+                    </div>
+                    <div className="text-[8px] mt-0.5" style={{ ...MONO, color: "#64748b" }}>
+                      {fmtTime(a.entryTime)}{a.exitTime ? ` → ${fmtTime(a.exitTime)}` : " → ACTIVE"}
+                      {a.spot ? `  ·  spot ${a.spot.toFixed(0)}` : ""}
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm"
+                        style={{ ...MONO, background: `${mdirClr}18`, color: mdirClr, border: `1px solid ${mdirClr}30` }}>
+                        {a.direction} {a.score}/5
+                      </span>
+                      {(a.concepts ?? []).map((c: string) => (
+                        <span key={c} className="text-[7px] px-1 py-0.5 rounded-sm font-bold"
+                          style={{ ...MONO, background: `${conceptColor[c] ?? "#64748b"}14`, color: conceptColor[c] ?? "#64748b" }}>
+                          {c}
+                        </span>
+                      ))}
+                      {a.trendOk && <span className="text-[7px] text-[#16a34a]" style={MONO}>+EMA✓</span>}
+                    </div>
+                  </div>
+                </div>
+                {/* Right: status + T1/T2 + chart */}
+                <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                  <span className="text-[8px] font-bold px-2 py-0.5 rounded-full"
+                    style={{ ...MONO, background: `${mstClr}18`, color: mstClr, border: `1px solid ${mstClr}40` }}>
+                    {mstIco} {mstLbl}
+                  </span>
+                  <div className="flex gap-1">
+                    <span className="text-[7px] px-1.5 py-0.5 rounded-sm font-bold"
+                      style={{ ...MONO,
+                        background: (a.t1Hit || a.status === "TARGET") ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                        color: (a.t1Hit || a.status === "TARGET") ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8") }}>
+                      T1{(a.t1Hit || a.status === "TARGET") ? "✓" : "✗"}
+                    </span>
+                    <span className="text-[7px] px-1.5 py-0.5 rounded-sm font-bold"
+                      style={{ ...MONO,
+                        background: a.status === "TARGET" ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                        color: a.status === "TARGET" ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8") }}>
+                      T2{a.status === "TARGET" ? "✓" : "✗"}
+                    </span>
+                  </div>
+                  {a.expiry && a.strike && a.direction && (
+                    <button
+                      onClick={() => window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(a.expiry, a.strike, a.direction)}`, "_blank")}
+                      className="opacity-50 w-5 h-5 flex items-center justify-center"
+                      style={{ color: mdirClr }}>
+                      <CandleIcon color={mdirClr} />
+                    </button>
+                  )}
+                </div>
+              </div>
+              {/* Progress bar for ACTIVE */}
+              {a.status === "ACTIVE" && (
+                <div className="px-3 pb-2">
+                  <div className="h-1.5 bg-[#e2e8f0] rounded-full overflow-hidden w-full relative">
+                    <div className="h-full rounded-full transition-all"
+                      style={{ width: `${mFill}%`, background: mFill >= 67 ? "#16a34a" : mFill >= 33 ? "#f59e0b" : "#e11d48" }} />
+                    <div className="absolute top-0 bottom-0 w-px bg-[#7c3aed] opacity-70" style={{ left: `${mT1Pct}%` }} />
+                  </div>
+                </div>
+              )}
+              {/* T1 / T2 single bold line above footer */}
+              <div className="px-3 py-1.5 flex items-center gap-3 border-t"
+                style={{ background: isDark ? "#0d1420" : "#fff", borderColor: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+                <span className="text-[9px] font-bold" style={{ ...MONO, color: "#b45309" }}>
+                  T1 ₹{a.rr?.target1?.toFixed(2) ?? "—"}{(a.t1Hit || a.status === "TARGET") ? " ✓" : ""}
+                </span>
+                <span className="text-[9px] font-bold" style={{ ...MONO, color: "#16a34a" }}>
+                  T2 ₹{a.rr?.target2?.toFixed(2) ?? "—"}{a.status === "TARGET" ? " ✓" : ""}
+                </span>
+                {(a.peakMove ?? 0) > 0 && (
+                  <span className="text-[9px] font-bold" style={{ ...MONO, color: "#7c3aed" }}>
+                    MAX +{a.peakMove.toFixed(1)}
+                  </span>
+                )}
+              </div>
+              {/* Footer: single row — ENTRY | CMP/SL | LOT P&L */}
+              <div className="grid grid-cols-3 border-t" style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+                {/* ENTRY */}
+                <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                  <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#64748b" }}>ENTRY</div>
+                  <div className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: mdirClr }}>
+                    ₹{a.rr?.entry?.toFixed(2) ?? "—"}
+                  </div>
+                </div>
+                {/* CMP (ACTIVE) or SL */}
+                <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                  <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#64748b" }}>
+                    {a.status === "ACTIVE" ? "CMP" : "SL"}
+                  </div>
+                  <div className="text-[12px] font-bold tabular-nums"
+                    style={{ ...MONO, color: a.status === "ACTIVE" ? ((a.lastLtp ?? 0) >= (a.rr?.entry ?? 0) ? "#16a34a" : "#e11d48") : "#e11d48" }}>
+                    ₹{(a.status === "ACTIVE" ? a.lastLtp : a.rr?.sl)?.toFixed(2) ?? "—"}
+                  </div>
+                  {a.status === "ACTIVE" && (
+                    <div className="text-[7px] mt-0.5" style={{ ...MONO, color: "#94a3b8" }}>SL ₹{a.rr?.sl?.toFixed(0)}</div>
+                  )}
+                </div>
+                {/* LOT P&L + MAX PTS small below */}
+                <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                  <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#64748b" }}>LOT P&L</div>
+                  <div className="text-[13px] font-bold tabular-nums" style={{ ...MONO, color: mpnlClr }}>
+                    {fmtLotPnl((a.currentPnL ?? 0) * LOT_QTY)}
+                  </div>
+                  <div className="text-[8px]" style={{ ...MONO, color: mpnlClr }}>
+                    {mpnlUp ? "+" : ""}{a.pnlPct?.toFixed(1) ?? "0.0"}%
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {/* Mobile totals row */}
+        <div className="rounded-xl overflow-hidden"
+          style={{ background: isDark ? "#0d1420" : "#f8fafc", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
+          <div className="grid grid-cols-3" style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+            {[
+              { label: "TRADES",   val: `${tableAlerts.length}`,                                color: "#475569" },
+              { label: "WIN RATE", val: wr ? `${wr}%` : "—",                                   color: wr && Number(wr) >= 70 ? "#16a34a" : "#e11d48" },
+              { label: "LOT P&L",  val: tableAlerts.length > 0 ? fmtLotPnl(totalLotPnl) : "—", color: totalLotPnl >= 0 ? "#16a34a" : "#e11d48" },
+            ].map(({ label, val, color }) => (
+              <div key={label} className="px-3 py-2.5 text-center" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
+                <div className="text-[7px] tracking-[1.5px] mb-1" style={{ ...MONO, color: "#64748b" }}>{label}</div>
+                <div className="text-[15px] font-bold" style={{ ...MONO, color }}>{val}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+      {/* ── DESKTOP TABLE (hidden on mobile) ── */}
+      <div className="hidden md:block flex-1 overflow-auto">
+      <div style={{ minWidth: "900px" }}>
       <div className="grid flex-shrink-0 border-b-2 border-[#cbd5e1] bg-[#f8fafc]"
         style={{ gridTemplateColumns: COLS }}>
         {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)","MAX PTS",""].map(h => (
@@ -1732,36 +2068,8 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       </div>
 
       {/* ── Table body ── */}
-      <div className="flex-1 overflow-y-auto">
-        {tableAlerts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-[50vh] gap-4">
-            <div className="text-[56px] text-[#e2e8f0]">◎</div>
-            <p className="text-[11px] text-[#94a3b8] text-center" style={MONO}>
-              {mode === "backtest"
-                ? "Select a date and click RUN BACKTEST to analyse a past day"
-                : !authenticated
-                ? "Connect Kite to start SMC scanning"
-                : isDemoMode
-                ? "SMC scanner requires live data"
-                : "No alerts yet · Scanner runs every minute from 09:21 AM"}
-            </p>
-            {mode === "live" && authenticated && !isDemoMode && (
-              <button onClick={onTrigger} disabled={busy}
-                className="px-5 py-2.5 text-[10px] font-bold tracking-[2px] rounded-sm border cursor-pointer disabled:opacity-40"
-                style={{...MONO, background:"#7c3aed18", borderColor:"#7c3aed", color:"#7c3aed"}}>
-                {busy ? "SCANNING…" : "▶ RUN SMC SCAN NOW"}
-              </button>
-            )}
-            {mode === "backtest" && authenticated && !isDemoMode && (
-              <button onClick={onHistScan} disabled={histBusy}
-                className="px-5 py-2.5 text-[10px] font-bold tracking-[2px] rounded-sm border cursor-pointer disabled:opacity-40"
-                style={{...MONO, background:"#ea580c18", borderColor:"#ea580c", color:"#ea580c"}}>
-                {histBusy ? "SCANNING…" : "◉ RUN BACKTEST NOW"}
-              </button>
-            )}
-          </div>
-        ) : (
-          tableAlerts.map((a, idx) => {
+      <div>
+        {tableAlerts.map((a, idx) => {
             const isCE       = a.direction === "CE";
             const isTimedWin  = a.status === "TIME_PROFIT";
             const isTimedExit = a.status === "TIME_EXIT";
@@ -1951,19 +2259,22 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                 </div>
               </div>
             );
-          })
-        )}
+          })}
       </div>
+      </div>
+      </div>
+      </>
+      )}
 
       {/* ── Footer stats ── */}
       {tableAlerts.length > 0 && (
-        <div className="flex-shrink-0 border-t border-[#cbd5e1] bg-white" style={{gap:"1px"}}>
+        <div className="hidden md:block flex-shrink-0 border-t border-[#cbd5e1] bg-white" style={{gap:"1px"}}>
           {mode === "backtest" && histResults !== null && (
             <div className="px-5 py-1.5 bg-[#fef9ec] border-b border-[#fde68a] text-[8px] text-[#b45309]" style={MONO}>
               ◉ BACKTEST  {histDate}  ·  expiry {expiry}  ·  all prices from historical candles  ·  EOD = position open at 15:30
             </div>
           )}
-          <div className="grid" style={{gridTemplateColumns:"repeat(7,1fr)", gap:"1px", background: isDark ? "#1e2a3a" : "#cbd5e1"}}>
+          <div className="grid grid-cols-4 sm:grid-cols-7" style={{gap:"1px", background: isDark ? "#1e2a3a" : "#cbd5e1"}}>
             {[
               { label:"TOTAL SIGNALS", val:`${tableAlerts.length}`,  color:"#475569" },
               { label:"ACTIVE",        val:`${active}`,              color:"#0284c7" },
@@ -1992,191 +2303,79 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
 }
 
 // ─── WATCHLIST ROW ────────────────────────────────────────────────────────────
-function WatchlistRow({ watched, candles3m, expiry, onRemove }:
+function WatchlistRow({ watched, candles3m: _candles3m, expiry, onRemove }:
   { watched:WatchedOption; candles3m:any[]; expiry:string; onRemove:()=>void }) {
 
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const { leg, status, entryPrice, currentPnL, pnlPct } = watched;
-  const isCE = leg.type === "CE";
+  const { leg, status, entryPrice, currentPnL, pnlPct, rr } = watched;
+  const isCE   = leg.type === "CE";
+  const dirClr = isCE ? "#0284c7" : "#e11d48";
 
-  // CE = green, PE = red
-  const borderClr = isCE ? "#16a34a" : "#e11d48";
-  const bgLight   = isCE ? "rgba(22,163,74,0.04)" : "rgba(225,29,72,0.05)";
-  const nameClr   = isCE ? "#15803d" : "#be123c";
+  const isWin  = status === "TARGET" || status === "TIME_PROFIT";
+  const isLoss = status === "SL" || status === "TIME_EXIT";
+  const stClr  = isWin ? "#16a34a" : isLoss ? "#e11d48" : status === "EXPIRED" ? "#b45309" : "#0284c7";
+  const pnlUp  = currentPnL >= 0;
+  const pnlClr = isWin ? "#16a34a" : isLoss ? "#e11d48" : pnlUp ? "#16a34a" : "#e11d48";
+  const stIco  = status === "TARGET" ? "🎯" : status === "SL" ? "🛑" : (status === "TIME_PROFIT" || status === "TIME_EXIT") ? "⏱" : "⏳";
+  const stLbl  = status === "TIME_PROFIT" ? "60M WIN" : status === "TIME_EXIT" ? "75M EXIT" : status;
 
-  const sc       = status==="TARGET"?"#16a34a":status==="SL"?"#e11d48":status==="ACTIVE"?"#0284c7":"#94a3b8";
-  const pnlUp    = currentPnL >= 0;
-  const pnlColor = status==="TARGET"?"#16a34a":status==="SL"?"#e11d48":pnlUp?"#16a34a":"#e11d48";
-  const moveUp   = leg.ltpChange >= 0;
-
-  // ── 3-min candle derived metrics ──────────────────────────────────────────
-  const lastC = candles3m.length > 0 ? candles3m[candles3m.length - 1] : null;
-  const prevC = candles3m.length > 1 ? candles3m[candles3m.length - 2] : null;
-
-  const rsi3m: number|null = lastC?.rsi14 ?? null;
-  const vol3m: number|null = lastC?.volume ?? null;
-
-  // OI/Vol from last 2 candles: ΔOI / (vol1 + vol2)
-  let oiVol3m: number|null = null;
-  if (lastC && prevC) {
-    const dOI  = Math.abs((lastC.oi ?? 0) - (prevC.oi ?? 0));
-    const dVol = (lastC.volume ?? 0) + (prevC.volume ?? 0);
-    oiVol3m = dVol > 0 ? +(dOI / dVol).toFixed(2) : null;
-  } else if (lastC && lastC.volume > 0) {
-    oiVol3m = +((lastC.oi ?? 0) / lastC.volume).toFixed(2);
-  }
-
-  const rsiColor   = rsi3m === null ? "#94a3b8" : rsi3m >= 70 ? "#e11d48" : rsi3m <= 30 ? "#16a34a" : "#475569";
-  const oiVolColor = oiVol3m === null ? "#94a3b8" : oiVol3m < 1 ? "#16a34a" : oiVol3m > 5 ? "#e11d48" : "#b45309";
-
-  const chartUrl = `https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, leg.strike, leg.type)}`;
+  const sl    = rr?.sl ?? 0;
+  const t1    = rr?.target1 ?? 0;
+  const t2    = rr?.target2 ?? 0;
+  const ltp   = leg.ltp;
+  const fill  = (t2 - sl) > 0 ? Math.min(Math.max(((ltp - sl) / (t2 - sl)) * 100, 0), 100) : 50;
+  const t1Pct = (t2 - sl) > 0 ? Math.min(((t1 - sl) / (t2 - sl)) * 100, 100) : 67;
+  const t1Hit = ltp >= t1 || isWin;
+  const lotPnl = currentPnL * 65;
+  const lotAbs = Math.abs(lotPnl);
+  const lotStr = (lotPnl >= 0 ? "+" : "−") + "₹" + (lotAbs >= 1000 ? `${(lotAbs/1000).toFixed(1)}K` : lotAbs.toFixed(0));
 
   return (
-    <div className="rounded overflow-hidden"
-      style={{ border:`1.5px solid ${borderClr}33`, borderLeft:`3px solid ${borderClr}`, background: isDark ? "#0a0f16" : "#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+    <div className="rounded-xl overflow-hidden"
+      style={{
+        background: isDark ? "#0d1420" : "#fff",
+        border: `1px solid ${isWin ? "#22c55e33" : isLoss ? "#ef444433" : isDark ? "#1e2a3a" : "#e2e8f0"}`,
+        borderLeft: `3px solid ${isWin ? "#22c55e" : isLoss ? "#e11d48" : status === "ACTIVE" ? dirClr : "#334155"}`,
+      }}>
 
-      {/* ── Header: drag handle + strike name + status + remove ── */}
-      <div className="flex items-center gap-2 px-3 py-2" style={{background:bgLight}}>
-        <span className="text-[#cbd5e1] cursor-grab select-none text-base leading-none">⠿</span>
-        <span className="text-[20px] font-bold flex-1" style={{...BEBAS, color:nameClr, letterSpacing:1}}>
-          NIFTY {leg.strike} {leg.type}
-        </span>
-        <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm tracking-[1px]"
-          style={{...MONO, background:`${sc}14`, color:sc, border:`1px solid ${sc}30`}}>{status}</span>
-        <span className="text-[9px] text-[#94a3b8]" style={MONO}>{watched.addedAt}</span>
-        <button onClick={onRemove}
-          className="w-5 h-5 flex items-center justify-center text-[#94a3b8] hover:text-[#e11d48] cursor-pointer text-sm">×</button>
-      </div>
-
-      {/* ── Price row: current price + move% + P&L + chart icon ── */}
-      <div className="flex items-center justify-between px-3 py-2 border-t border-[#f1f5f9]">
-        <div className="flex items-baseline gap-2" style={MONO}>
-          <span className="text-[22px] font-bold tabular-nums" style={{color:borderClr}}>₹{leg.ltp.toFixed(2)}</span>
-          {leg.ltpChange != null && (
-            <span className="text-[11px] font-bold" style={{color:moveUp?"#16a34a":"#e11d48"}}>
-              {moveUp?"▲":"▼"}{Math.abs(leg.ltpChange).toFixed(2)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-right" style={MONO}>
-            <div className="text-[13px] font-bold tabular-nums" style={{color:pnlColor}}>
-              {pnlUp?"+":""}₹{currentPnL.toFixed(2)}
+      {/* Top section */}
+      <div className="px-3 py-3 flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2.5 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0"
+            style={{ background: `${dirClr}18`, border: `1.5px solid ${dirClr}40` }}>
+            <span className="text-[7px] font-bold" style={{ ...MONO, color: "#64748b" }}>NI</span>
+            <span className="text-[12px] font-bold" style={{ ...BEBAS, color: dirClr }}>{leg.type}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-[15px] font-bold leading-tight" style={{ ...BEBAS, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+              NIFTY {leg.strike} {isCE ? "Call" : "Put"}
             </div>
-            <div className="text-[10px] font-bold" style={{color:pnlColor}}>
-              {pnlUp?"+":""}{pnlPct.toFixed(2)}%
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[13px] font-bold tabular-nums" style={{ ...MONO, color: dirClr }}>₹{ltp.toFixed(2)}</span>
+              {leg.ltpChange != null && (
+                <span className="text-[9px] font-bold" style={{ ...MONO, color: (leg.ltpChange ?? 0) >= 0 ? "#16a34a" : "#e11d48" }}>
+                  {(leg.ltpChange ?? 0) >= 0 ? "▲" : "▼"}{Math.abs(leg.ltpChange ?? 0).toFixed(2)}
+                </span>
+              )}
             </div>
           </div>
-          <button onClick={()=>window.open(chartUrl,"_blank")}
-            title="Open chart" style={{color:borderClr}}
-            className="w-6 h-6 flex items-center justify-center rounded hover:opacity-60 cursor-pointer transition-opacity">
-            <CandleIcon color={borderClr} />
-          </button>
         </div>
-      </div>
-
-      {/* ── 3-min candle metrics: RSI | OI/Vol (2c) | Volume ── */}
-      <div className="grid grid-cols-3 divide-x divide-[#f1f5f9] border-t border-[#f1f5f9] bg-[#fafafa]">
-        <div className="px-3 py-2 text-center">
-          <div className="text-[7px] text-[#94a3b8] tracking-[1px] uppercase mb-0.5" style={MONO}>RSI 3m</div>
-          <div className="text-[13px] font-bold tabular-nums" style={{...MONO, color:rsiColor}}>
-            {rsi3m !== null ? rsi3m.toFixed(1) : "—"}
-          </div>
-        </div>
-        <div className="px-3 py-2 text-center">
-          <div className="text-[7px] text-[#94a3b8] tracking-[1px] uppercase mb-0.5" style={MONO}>OI/VOL (2c)</div>
-          <div className="text-[13px] font-bold tabular-nums" style={{...MONO, color:oiVolColor}}>
-            {oiVol3m !== null ? oiVol3m.toFixed(2) : "—"}
-          </div>
-        </div>
-        <div className="px-3 py-2 text-center">
-          <div className="text-[7px] text-[#94a3b8] tracking-[1px] uppercase mb-0.5" style={MONO}>VOLUME 3m</div>
-          <div className="text-[13px] font-bold text-[#475569] tabular-nums" style={MONO}>
-            {vol3m !== null ? fmtOI(vol3m) : "—"}
+        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+          <div className="flex gap-1">
+            <button onClick={() => window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, leg.strike, leg.type)}`, "_blank")}
+              className="w-5 h-5 flex items-center justify-center opacity-50 cursor-pointer" style={{ color: dirClr }}>
+              <CandleIcon color={dirClr} />
+            </button>
+            <button onClick={onRemove}
+              className="w-5 h-5 flex items-center justify-center text-[#94a3b8] hover:text-[#e11d48] cursor-pointer">
+              <IconX size={13} />
+            </button>
           </div>
         </div>
       </div>
 
-      {/* ── Result card — always visible, updates as price moves ── */}
-      {(() => {
-        const isTarget   = status === "TARGET";
-        const isSL       = status === "SL";
-        const isTimedWin = status === "TIME_PROFIT";
-        const isTimedExit= status === "TIME_EXIT";
-        const isActive   = status === "ACTIVE" || status === "EXPIRED";
 
-        const bg  = isTarget || isTimedWin ? (isDark?"#052e16":"#f0fdf4") : isSL || isTimedExit ? (isDark?"#2d0505":"#fef2f2") : (isDark?"#0d1420":"#f8fafc");
-        const bdr = isTarget || isTimedWin ? (isDark?"#166534":"#bbf7d0") : isSL || isTimedExit ? (isDark?"#991b1b":"#fecaca") : (isDark?"#1e2a3a":"#e2e8f0");
-        const clr = isTarget || isTimedWin ? "#15803d" : isSL || isTimedExit ? "#be123c"  : "#475569";
-        const icon  = isTarget ? "🎯" : isSL ? "🛑" : isTimedWin || isTimedExit ? "⏱" : "⏳";
-        const label = isTarget    ? "TARGET HIT — PREDICTION CORRECT"
-          : isSL                  ? "STOP LOSS HIT — PREDICTION WRONG"
-          : isTimedWin            ? "60-MIN EXIT — PROFIT LOCKED"
-          : isTimedExit           ? "75-MIN EXIT — POSITION CLOSED"
-          : "IN TRADE — TRACKING";
-        const pnlSign  = currentPnL >= 0 ? "+" : "−";
-        const rupee    = `${pnlSign}₹${Math.abs(currentPnL).toFixed(2)}`;
-        const pctStr   = `${pnlSign}${Math.abs(pnlPct).toFixed(2)}%`;
-        const lotPnl   = currentPnL * 65;
-        const lotAbs   = Math.abs(lotPnl);
-        const lotStr   = lotAbs >= 1000
-          ? `${pnlSign}₹${(lotAbs/1000).toFixed(1)}K`
-          : `${pnlSign}₹${lotAbs.toFixed(0)}`;
-        const rr       = watched.rr;
-
-        return (
-          <div className="border-t" style={{background:bg, borderColor:bdr}}>
-            {/* Top row: label + P&L */}
-            <div className="px-3 py-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-base leading-none">{icon}</span>
-                <div>
-                  <div className="text-[8px] font-bold tracking-[1px]" style={{...MONO, color:clr}}>{label}</div>
-                  <div className="text-[9px] text-[#64748b]" style={MONO}>
-                    Entry ₹{entryPrice.toFixed(2)}
-                    {!isActive && ` · Exit ₹${leg.ltp.toFixed(2)}`}
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[18px] font-bold tabular-nums leading-tight" style={{...MONO, color:clr}}>{rupee}</div>
-                <div className="text-[10px] font-bold" style={{...MONO, color:clr}}>{pctStr} per unit</div>
-                <div className="text-[11px] font-bold mt-0.5" style={{...MONO, color:clr}}>
-                  {lotStr} <span className="text-[8px] font-normal opacity-70">× 65 lot</span>
-                </div>
-              </div>
-            </div>
-            {/* Progress bar: SL ←——— current ———→ T2 */}
-            {isActive && (() => {
-              const sl  = rr.sl;
-              const t2  = rr.target2;
-              const cur = leg.ltp;
-              const range   = t2 - sl;
-              const fillPct = range > 0 ? Math.min(Math.max(((cur - sl) / range) * 100, 0), 100) : 50;
-              const barClr  = fillPct >= 50 ? "#16a34a" : "#e11d48";
-              return (
-                <div className="px-3 pb-2">
-                  <div className="flex justify-between text-[7px] text-[#94a3b8] mb-1" style={MONO}>
-                    <span>SL ₹{sl.toFixed(0)}</span>
-                    <span>T ₹{t2.toFixed(0)}</span>
-                  </div>
-                  <div className="h-2 bg-[#e2e8f0] rounded-full overflow-hidden relative">
-                    <div className="h-full rounded-full transition-all duration-500"
-                      style={{width:`${fillPct}%`, background:barClr}} />
-                    {/* current marker line */}
-                    <div className="absolute top-0 bottom-0 w-0.5 bg-[#1e293b]"
-                      style={{left:`${fillPct}%`, transform:"translateX(-50%)"}} />
-                  </div>
-                  <div className="text-center text-[8px] mt-0.5 font-bold" style={{...MONO, color:barClr}}>
-                    {fillPct.toFixed(0)}% to target
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        );
-      })()}
     </div>
   );
 }
@@ -2318,31 +2517,31 @@ function OhlcTab({ expiry, rows, ohlcDate, setOhlcDate, ohlcCE, setOhlcCE, ohlcP
 
         {/* ── Header: title + 9:15 AM ──── 3:30 PM ── */}
         <div className="bg-white border border-[#cbd5e1] rounded-md shadow-sm overflow-hidden">
-          <div className="px-5 py-3 border-b border-[#cbd5e1]" style={{background:"rgba(2,132,199,0.04)"}}>
-            <div className="flex items-center justify-between">
+          <div className="px-4 sm:px-5 py-3 border-b border-[#cbd5e1]" style={{background:"rgba(2,132,199,0.04)"}}>
+            <div className="flex items-center justify-between gap-2">
               {/* Left corner: 9:15 AM */}
-              <div className="flex items-center gap-2">
-                <div className="px-2.5 py-1.5 rounded bg-[#16a34a]/10 border border-[#16a34a]/30">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <div className="px-2 py-1.5 rounded bg-[#16a34a]/10 border border-[#16a34a]/30">
                   <div className="text-[7px] text-[#16a34a]/70 tracking-[1px] uppercase leading-none mb-0.5" style={MONO}>OPEN</div>
-                  <div className="text-[14px] font-bold text-[#16a34a] leading-none" style={MONO}>9:15 AM</div>
+                  <div className="text-[12px] sm:text-[14px] font-bold text-[#16a34a] leading-none" style={MONO}>9:15 AM</div>
                 </div>
-                <div className="text-[#cbd5e1]" style={MONO}>────</div>
+                <div className="hidden sm:block text-[#cbd5e1]" style={MONO}>────</div>
               </div>
 
               {/* Center: title */}
-              <div className="text-center">
-                <div className="text-[15px] tracking-[2px] text-[#0284c7]" style={BEBAS}>OHLC CSV DOWNLOAD</div>
-                <div className="text-[8px] text-[#64748b]" style={MONO}>
-                  {histData ? `Spot ₹${histData.spot} · ATM ${histData.atm} · ${displayRows.length} strikes` : `${displayRows.length} strikes`} · OHLCV + OI + RSI(14)
+              <div className="text-center min-w-0">
+                <div className="text-[13px] sm:text-[15px] tracking-[2px] text-[#0284c7]" style={BEBAS}>OHLC CSV DOWNLOAD</div>
+                <div className="text-[7px] sm:text-[8px] text-[#64748b] truncate" style={MONO}>
+                  {histData ? `ATM ${histData.atm} · ${displayRows.length} strikes` : `${displayRows.length} strikes`} · OHLCV+OI+RSI
                 </div>
               </div>
 
               {/* Right corner: 3:30 PM */}
-              <div className="flex items-center gap-2">
-                <div className="text-[#cbd5e1]" style={MONO}>────</div>
-                <div className="px-2.5 py-1.5 rounded bg-[#e11d48]/10 border border-[#e11d48]/30">
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <div className="hidden sm:block text-[#cbd5e1]" style={MONO}>────</div>
+                <div className="px-2 py-1.5 rounded bg-[#e11d48]/10 border border-[#e11d48]/30">
                   <div className="text-[7px] text-[#e11d48]/70 tracking-[1px] uppercase leading-none mb-0.5" style={MONO}>CLOSE</div>
-                  <div className="text-[14px] font-bold text-[#e11d48] leading-none" style={MONO}>3:30 PM</div>
+                  <div className="text-[12px] sm:text-[14px] font-bold text-[#e11d48] leading-none" style={MONO}>3:30 PM</div>
                 </div>
               </div>
             </div>

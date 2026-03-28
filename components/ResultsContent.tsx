@@ -69,7 +69,7 @@ export function ResultsContent() {
   const [err, setErr]         = useState("");
 
   useEffect(() => {
-    fetch(`${API}/api/results`)
+    fetch(`${API}/api/results`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => {
         setDates(d);
@@ -89,7 +89,7 @@ export function ResultsContent() {
     if (!selDate) return;
     setLoading(true);
     setErr("");
-    fetch(`${API}/api/results?type=${tab}&date=${selDate}`)
+    fetch(`${API}/api/results?type=${tab}&date=${selDate}`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => {
         if (d.error) { setErr(d.error); setRows([]); }

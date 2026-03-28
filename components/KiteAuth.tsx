@@ -28,70 +28,149 @@ export function KiteAuth({ onConnected, errorMsg }: Props) {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-[#080b0f]"
-      style={{ backgroundImage: "radial-gradient(ellipse at 50% 40%, rgba(2,132,199,0.06) 0%, transparent 70%)" }}>
+    <div className="flex items-center justify-center min-h-screen relative overflow-hidden"
+      style={{ background: "#050a0f" }}>
 
-      <div className="w-[360px]">
-        {/* Card */}
-        <div className="relative border border-[#1e2a3a] bg-[#0a0f16] overflow-hidden"
-          style={{ boxShadow: "0 0 40px rgba(2,132,199,0.08), 0 0 0 1px rgba(2,132,199,0.05)" }}>
+      {/* Grid background */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        backgroundImage: "linear-gradient(rgba(2,132,199,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(2,132,199,0.04) 1px, transparent 1px)",
+        backgroundSize: "48px 48px",
+      }} />
 
-          {/* Top accent line */}
-          <div className="h-[2px] w-full" style={{ background: "linear-gradient(90deg, transparent, #0284c7, #ea580c, transparent)" }} />
+      {/* Top ambient glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] pointer-events-none" style={{
+        background: "radial-gradient(ellipse at 50% 0%, rgba(2,132,199,0.10) 0%, transparent 65%)",
+      }} />
+      {/* Bottom orange glow */}
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[400px] h-[200px] pointer-events-none" style={{
+        background: "radial-gradient(ellipse at 50% 100%, rgba(234,88,12,0.07) 0%, transparent 70%)",
+      }} />
 
-          {/* Corner decorations */}
-          <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-[#0284c7]/40" />
-          <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-[#0284c7]/40" />
-          <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-[#0284c7]/40" />
-          <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-[#0284c7]/40" />
+      {/* Main layout */}
+      <div className="relative z-10 w-[420px] flex flex-col items-center">
 
-          {/* Card header */}
-          <div className="px-8 pt-8 pb-5 border-b border-[#1e2a3a]" style={MONO}>
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[9px] text-[#4a6080] tracking-[2px]">SYSTEM AUTH</span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] animate-pulse" />
-                <span className="text-[8px] text-[#22c55e] tracking-[1px]">ONLINE</span>
-              </span>
-            </div>
-            <div className="text-[11px] text-[#e2e8f0] tracking-[1px]">KITE CONNECT</div>
-            <div className="text-[8px] text-[#2a3a4a] mt-0.5 tracking-[1px]">ZERODHA · SESSION REQUIRED</div>
+        {/* Status pill */}
+        <div className="flex items-center gap-2 px-4 py-1.5 mb-8 border border-[#0f1923] bg-[#080b0f]/80 rounded-full backdrop-blur-sm">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#22c55e] live-pulse" />
+          <span className="text-[8px] text-[#22c55e] tracking-[2.5px]" style={MONO}>SYSTEM ONLINE</span>
+          <span className="w-px h-3 bg-[#1e2a3a]" />
+          <span className="text-[8px] text-[#2a3a4a] tracking-[1.5px]" style={MONO}>NSE · BSE</span>
+        </div>
+
+        {/* Brand */}
+        <div className="text-center mb-8">
+          <div className="text-[58px] leading-none tracking-[2px] mb-1" style={BEBAS}>
+            <span className="text-white">NIFTY</span>
+            <span style={{ color: "#0284c7" }}>.</span>
+            <span style={{ color: "#ea580c" }}>ALGO</span>
           </div>
-
-          <div className="px-8 py-6 space-y-4" style={MONO}>
-
-            {/* Error */}
-            {errorMsg && (
-              <div className="flex gap-2 px-3 py-2 border border-[#ef4444]/30 bg-[#ef4444]/5 text-[9px] text-[#ef4444]">
-                <span>✗</span><span>{decodeURIComponent(errorMsg)}</span>
-              </div>
-            )}
-
-            {/* Connect button */}
-            <button onClick={handleConnect} disabled={connecting}
-              className="w-full py-3 flex items-center justify-center gap-2 text-[10px] tracking-[2px] border cursor-pointer disabled:opacity-60 transition-all hover:bg-[#ea580c]/15"
-              style={{ background: "rgba(234,88,12,0.08)", borderColor: "#ea580c", color: "#ea580c" }}>
-              {connecting
-                ? <><span className="w-3 h-3 border border-[#ea580c] border-t-transparent rounded-full animate-spin" />CONNECTING…</>
-                : "⚡ CONNECT KITE"}
-            </button>
-
-            {/* Divider */}
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-px bg-[#1e2a3a]" />
-              <span className="text-[8px] text-[#2a3a4a]">OR</span>
-              <div className="flex-1 h-px bg-[#1e2a3a]" />
-            </div>
-
-            {/* Manual token */}
-            <ManualTokenEntry onConnected={onConnected} />
-
+          <div className="flex items-center justify-center gap-3">
+            <div className="h-px w-12 bg-gradient-to-r from-transparent to-[#1e2a3a]" />
+            <span className="text-[9px] tracking-[3px]" style={{ ...MONO, color: "#4a6080" }}>TRADING TERMINAL</span>
+            <div className="h-px w-12 bg-gradient-to-l from-transparent to-[#1e2a3a]" />
           </div>
         </div>
 
+        {/* Card */}
+        <div className="w-full relative" style={{
+          border: "1px solid #1e2a3a",
+          background: "#080d14",
+          boxShadow: "0 0 80px rgba(2,132,199,0.07), 0 0 0 1px rgba(2,132,199,0.04), 0 32px 64px rgba(0,0,0,0.5)",
+        }}>
+          {/* Top line */}
+          <div className="h-[1.5px] w-full" style={{ background: "linear-gradient(90deg, transparent 0%, #0284c7 30%, #ea580c 70%, transparent 100%)" }} />
+
+          {/* Corner brackets */}
+          <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-[#0284c7]/30" />
+          <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-[#0284c7]/30" />
+          <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-[#ea580c]/30" />
+          <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-[#ea580c]/30" />
+
+          {/* Header */}
+          <div className="px-8 pt-7 pb-5" style={{ borderBottom: "1px solid #0f1923" }}>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[8px] tracking-[2.5px] mb-1" style={{ ...MONO, color: "#2a3a4a" }}>AUTHENTICATION REQUIRED</div>
+                <div className="text-[13px] tracking-[1px] text-white" style={MONO}>KITE CONNECT</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[8px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#2a3a4a" }}>BROKER</div>
+                <div className="text-[11px] font-bold tracking-[1.5px]" style={{ ...MONO, color: "#0284c7" }}>ZERODHA</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Body */}
+          <div className="px-8 py-7 space-y-5">
+
+            {/* Error */}
+            {errorMsg && (
+              <div className="flex gap-2.5 px-3.5 py-2.5 text-[9px] text-[#ef4444]" style={{
+                ...MONO, border: "1px solid rgba(239,68,68,0.2)", background: "rgba(239,68,68,0.04)",
+              }}>
+                <span className="mt-px">⚠</span>
+                <span>{decodeURIComponent(errorMsg)}</span>
+              </div>
+            )}
+
+            {/* Connect via Kite */}
+            <div>
+              <div className="text-[8px] tracking-[2px] mb-2" style={{ ...MONO, color: "#2a3a4a" }}>
+                METHOD 1 — BROWSER AUTH
+              </div>
+              <button onClick={handleConnect} disabled={connecting}
+                className="w-full py-3.5 flex items-center justify-center gap-3 text-[11px] tracking-[3px] font-bold cursor-pointer disabled:opacity-50 transition-all"
+                style={{
+                  ...MONO,
+                  background: "rgba(234,88,12,0.09)",
+                  border: "1px solid #ea580c",
+                  color: "#ea580c",
+                  boxShadow: "0 0 24px rgba(234,88,12,0.06)",
+                }}>
+                {connecting
+                  ? <><span className="w-3 h-3 rounded-full border border-[#ea580c] border-t-transparent animate-spin" />CONNECTING…</>
+                  : <>⚡ CONNECT KITE</>}
+              </button>
+            </div>
+
+            {/* Divider */}
+            <div className="flex items-center gap-4">
+              <div className="flex-1 h-px bg-[#0f1923]" />
+              <span className="text-[8px] tracking-[1px]" style={{ ...MONO, color: "#1e2a3a" }}>OR</span>
+              <div className="flex-1 h-px bg-[#0f1923]" />
+            </div>
+
+            {/* Manual token */}
+            <div>
+              <div className="text-[8px] tracking-[2px] mb-2" style={{ ...MONO, color: "#2a3a4a" }}>
+                METHOD 2 — MANUAL TOKEN
+              </div>
+              <ManualTokenEntry onConnected={onConnected} />
+            </div>
+
+          </div>
+
+          {/* Bottom line */}
+          <div className="h-px w-full" style={{ background: "linear-gradient(90deg, transparent, #0f1923, transparent)" }} />
+        </div>
+
+        {/* Footer stats */}
+        <div className="w-full mt-4 grid grid-cols-3 gap-[1px]" style={{ background: "#0f1923" }}>
+          {[
+            { label: "SESSION",  val: "REQUIRED", color: "#ea580c" },
+            { label: "API VER",  val: "v3",        color: "#0284c7" },
+            { label: "EXCHANGE", val: "NSE/BSE",   color: "#22c55e" },
+          ].map(({ label, val, color }) => (
+            <div key={label} className="px-4 py-2.5 text-center" style={{ background: "#080b0f" }}>
+              <div className="text-[7px] tracking-[1.5px] mb-1" style={{ ...MONO, color: "#2a3a4a" }}>{label}</div>
+              <div className="text-[10px] font-bold tracking-[1px]" style={{ ...MONO, color }}>{val}</div>
+            </div>
+          ))}
+        </div>
+
         {/* Bottom label */}
-        <div className="text-center mt-4 text-[8px] text-[#2a3a4a] tracking-[2px]" style={MONO}>
-          ZERODHA · KITE CONNECT API
+        <div className="mt-5 text-center text-[8px] tracking-[2px]" style={{ ...MONO, color: "#1e2a3a" }}>
+          POWERED BY ZERODHA · KITE CONNECT API
         </div>
       </div>
     </div>
@@ -123,18 +202,28 @@ function ManualTokenEntry({ onConnected }: { onConnected: (u: string) => void })
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-2" style={MONO}>
-      <div className="text-[8px] text-[#4a6080] tracking-[1.5px]">ACCESS TOKEN</div>
-      <div className="flex gap-2">
-        <input name="token" type="text" placeholder="paste token…"
-          className="flex-1 bg-[#080b0f] border border-[#1e2a3a] text-[#e2e8f0] px-3 py-2 text-[10px] outline-none focus:border-[#0284c7] placeholder:text-[#2a3a4a] transition-colors"
-          style={MONO} />
-        <button type="submit" disabled={loading}
-          className="px-4 py-2 text-[10px] tracking-[1px] border cursor-pointer disabled:opacity-50 hover:bg-[#0284c7]/15 transition-all"
-          style={{ background: "rgba(2,132,199,0.06)", borderColor: "#1e2a3a", color: "#0284c7" }}>
-          {loading ? "…" : "SET"}
-        </button>
-      </div>
+    <form onSubmit={handleSubmit} className="flex gap-2" style={MONO}>
+      <input name="token" type="text" placeholder="paste access token…"
+        className="flex-1 px-3 py-2.5 text-[10px] outline-none transition-colors"
+        style={{
+          background: "#040810",
+          border: "1px solid #1e2a3a",
+          color: "#e2e8f0",
+          fontFamily: "'Space Mono', monospace",
+        }}
+        onFocus={e => (e.target.style.borderColor = "#0284c7")}
+        onBlur={e  => (e.target.style.borderColor = "#1e2a3a")}
+      />
+      <button type="submit" disabled={loading}
+        className="px-5 py-2.5 text-[10px] tracking-[1.5px] font-bold cursor-pointer disabled:opacity-50 transition-all"
+        style={{
+          background: "rgba(2,132,199,0.08)",
+          border: "1px solid #1e2a3a",
+          color: "#0284c7",
+          fontFamily: "'Space Mono', monospace",
+        }}>
+        {loading ? "…" : "SET"}
+      </button>
     </form>
   );
 }

@@ -11,7 +11,7 @@ import {
   type WatchedOption,
 } from "@/lib/options";
 import { smcApi, optionsApi, authApi, autoTradeApi, createWS, isDemoMode, AuthError } from "@/lib/api";
-import { ThemeToggle } from "@/lib/theme";
+import { ThemeToggle, useTheme } from "@/lib/theme";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
@@ -33,6 +33,9 @@ function OptionsPageInner() {
   const kiteStatus   = searchParams.get("kite");
   const kiteUser     = searchParams.get("user") ?? "";
   const kiteErrMsg   = searchParams.get("msg")  ?? "";
+
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   const [expiries, setExpiries] = useState<string[]>(getNiftyExpiries());
   const [expiry, setExpiry]           = useState("");
@@ -528,7 +531,7 @@ function OptionsPageInner() {
             <div className="flex-1 overflow-y-auto">
               {filteredRows.map(row => <ChainRow key={row.strike} row={row} atmStrike={atmStrike} onAddWatch={addToWatch} addedTokens={watchlistTokens} expiry={expiry} onOpenChart={(_token, strike, type, _sym) => { window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, strike, type)}`, "_blank"); }} />)}
             </div>
-            <div className="flex-shrink-0 grid grid-cols-4 border-t border-[#cbd5e1]" style={{ gap:"1px", background:"#cbd5e1" }}>
+            <div className="flex-shrink-0 grid grid-cols-4 border-t border-[#cbd5e1]" style={{ gap:"1px", background: isDark ? "#1e2a3a" : "#cbd5e1" }}>
               {[
                 { label:"TOTAL CE OI", val:fmtOI(totalCEOI), color:"#0284c7" },
                 { label:"TOTAL PE OI", val:fmtOI(totalPEOI), color:"#e11d48" },
@@ -1501,6 +1504,8 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   autoTradeEnabled: boolean; autoPositions: any[]; onToggleAutoTrade: () => void;
 }) {
   const [mode, setMode] = useState<"live"|"backtest">("live");
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
 
   // Which alerts to show in table
   const tableAlerts = mode === "backtest" && histResults !== null ? histResults : alerts;
@@ -1565,7 +1570,10 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
             )}
             {wr !== null && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 border rounded-sm"
-                style={{background:Number(wr)>=70?"#f0fdf4":"#fef2f2", borderColor:Number(wr)>=70?"#bbf7d0":"#fecaca"}}>
+                style={{
+                  background: Number(wr)>=70 ? (isDark?"#052e16":"#f0fdf4") : (isDark?"#2d0505":"#fef2f2"),
+                  borderColor: Number(wr)>=70 ? (isDark?"#166534":"#bbf7d0") : (isDark?"#991b1b":"#fecaca"),
+                }}>
                 <span className="text-[9px] font-bold" style={{...MONO, color:Number(wr)>=70?"#16a34a":"#e11d48"}}>
                   {wr}% W/R  {wins}W/{losses}L
                 </span>
@@ -1582,7 +1590,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   className="px-3 py-1.5 text-[9px] font-bold tracking-[1.5px] rounded-sm border cursor-pointer transition-all"
                   style={{
                     ...MONO,
-                    background: autoTradeEnabled ? "#16a34a" : "#f8fafc",
+                    background: autoTradeEnabled ? "#16a34a" : (isDark ? "#0a0f16" : "#f8fafc"),
                     borderColor: autoTradeEnabled ? "#16a34a" : "#e11d48",
                     color: autoTradeEnabled ? "#fff" : "#e11d48",
                   }}>
@@ -1620,7 +1628,10 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
             </div>
             {histResults !== null && wr !== null && (
               <div className="flex items-center gap-1.5 px-2.5 py-1 border rounded-sm"
-                style={{background:Number(wr)>=70?"#f0fdf4":"#fef2f2", borderColor:Number(wr)>=70?"#bbf7d0":"#fecaca"}}>
+                style={{
+                  background: Number(wr)>=70 ? (isDark?"#052e16":"#f0fdf4") : (isDark?"#2d0505":"#fef2f2"),
+                  borderColor: Number(wr)>=70 ? (isDark?"#166534":"#bbf7d0") : (isDark?"#991b1b":"#fecaca"),
+                }}>
                 <span className="text-[9px] font-bold" style={{...MONO, color:Number(wr)>=70?"#16a34a":"#e11d48"}}>
                   {histDate} · {wr}% W/R  {wins}W/{losses}L{eod>0?` · ${eod} EOD`:""}
                 </span>
@@ -1717,7 +1728,15 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
             const isCE       = a.direction === "CE";
             const isTimedWin  = a.status === "TIME_PROFIT";
             const isTimedExit = a.status === "TIME_EXIT";
-            const rowBg      = a.status === "TARGET" || isTimedWin ? "#f0fdf4" : a.status === "SL" || isTimedExit ? "#fff5f5" : a.status === "EOD" ? "#fefce8" : idx % 2 === 0 ? "#fff" : "#fafafa";
+            const rowBg      = a.status === "TARGET" || isTimedWin
+              ? (isDark ? "#052e16" : "#f0fdf4")
+              : a.status === "SL" || isTimedExit
+              ? (isDark ? "#2d0505" : "#fff5f5")
+              : a.status === "EOD"
+              ? (isDark ? "#1c1500" : "#fefce8")
+              : idx % 2 === 0
+              ? (isDark ? "#0a0f16" : "#fff")
+              : (isDark ? "#0d1420" : "#fafafa");
             const dirColor   = isCE ? "#0284c7" : "#e11d48";
             const stColor    = a.status === "TARGET" || isTimedWin ? "#16a34a" : a.status === "SL" || isTimedExit ? "#e11d48" : a.status === "EOD" ? "#b45309" : "#0284c7";
             const pnlUp      = a.currentPnL >= 0;
@@ -1809,13 +1828,13 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                   {/* T1 / T2 hit indicators */}
                   <div className="flex gap-1 mb-0.5">
                     <span className="text-[7px] px-1 py-0.5 rounded-sm font-bold" style={{...MONO,
-                      background: (a.t1Hit || a.status === "TARGET") ? "#dcfce7" : "#f1f5f9",
-                      color:      (a.t1Hit || a.status === "TARGET") ? "#15803d" : "#94a3b8"}}>
+                      background: (a.t1Hit || a.status === "TARGET") ? (isDark?"#052e16":"#dcfce7") : (isDark?"#0f1923":"#f1f5f9"),
+                      color:      (a.t1Hit || a.status === "TARGET") ? "#15803d" : (isDark?"#4a6080":"#94a3b8")}}>
                       T1{(a.t1Hit || a.status === "TARGET") ? "✓" : "✗"}
                     </span>
                     <span className="text-[7px] px-1 py-0.5 rounded-sm font-bold" style={{...MONO,
-                      background: a.status === "TARGET" ? "#dcfce7" : "#f1f5f9",
-                      color:      a.status === "TARGET" ? "#15803d" : "#94a3b8"}}>
+                      background: a.status === "TARGET" ? (isDark?"#052e16":"#dcfce7") : (isDark?"#0f1923":"#f1f5f9"),
+                      color:      a.status === "TARGET" ? "#15803d" : (isDark?"#4a6080":"#94a3b8")}}>
                       T2{a.status === "TARGET" ? "✓" : "✗"}
                     </span>
                   </div>
@@ -1907,7 +1926,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
               ◉ BACKTEST  {histDate}  ·  expiry {expiry}  ·  all prices from historical candles  ·  EOD = position open at 15:30
             </div>
           )}
-          <div className="grid" style={{gridTemplateColumns:"repeat(7,1fr)", gap:"1px", background:"#cbd5e1"}}>
+          <div className="grid" style={{gridTemplateColumns:"repeat(7,1fr)", gap:"1px", background: isDark ? "#1e2a3a" : "#cbd5e1"}}>
             {[
               { label:"TOTAL SIGNALS", val:`${tableAlerts.length}`,  color:"#475569" },
               { label:"ACTIVE",        val:`${active}`,              color:"#0284c7" },
@@ -1939,6 +1958,8 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
 function WatchlistRow({ watched, candles3m, expiry, onRemove }:
   { watched:WatchedOption; candles3m:any[]; expiry:string; onRemove:()=>void }) {
 
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   const { leg, status, entryPrice, currentPnL, pnlPct } = watched;
   const isCE = leg.type === "CE";
 
@@ -1976,7 +1997,7 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
 
   return (
     <div className="rounded overflow-hidden"
-      style={{ border:`1.5px solid ${borderClr}33`, borderLeft:`3px solid ${borderClr}`, background:"#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
+      style={{ border:`1.5px solid ${borderClr}33`, borderLeft:`3px solid ${borderClr}`, background: isDark ? "#0a0f16" : "#fff", boxShadow:"0 1px 3px rgba(0,0,0,0.06)" }}>
 
       {/* ── Header: drag handle + strike name + status + remove ── */}
       <div className="flex items-center gap-2 px-3 py-2" style={{background:bgLight}}>
@@ -2048,8 +2069,8 @@ function WatchlistRow({ watched, candles3m, expiry, onRemove }:
         const isTimedExit= status === "TIME_EXIT";
         const isActive   = status === "ACTIVE" || status === "EXPIRED";
 
-        const bg  = isTarget || isTimedWin ? "#f0fdf4" : isSL || isTimedExit ? "#fef2f2" : "#f8fafc";
-        const bdr = isTarget || isTimedWin ? "#bbf7d0" : isSL || isTimedExit ? "#fecaca"  : "#e2e8f0";
+        const bg  = isTarget || isTimedWin ? (isDark?"#052e16":"#f0fdf4") : isSL || isTimedExit ? (isDark?"#2d0505":"#fef2f2") : (isDark?"#0d1420":"#f8fafc");
+        const bdr = isTarget || isTimedWin ? (isDark?"#166534":"#bbf7d0") : isSL || isTimedExit ? (isDark?"#991b1b":"#fecaca") : (isDark?"#1e2a3a":"#e2e8f0");
         const clr = isTarget || isTimedWin ? "#15803d" : isSL || isTimedExit ? "#be123c"  : "#475569";
         const icon  = isTarget ? "🎯" : isSL ? "🛑" : isTimedWin || isTimedExit ? "⏱" : "⏳";
         const label = isTarget    ? "TARGET HIT — PREDICTION CORRECT"

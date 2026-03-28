@@ -45,6 +45,35 @@
   --select-bg:   #080b0f;
 }
 
+/* ── Shadcn/radix component CSS variables ────────────────────────────────── */
+:root, [data-theme="light"] {
+  --popover:              0 0% 100%;
+  --popover-foreground:   215 25% 18%;
+  --border:               213 27% 84%;
+  --input:                213 27% 84%;
+  --ring:                 203 89% 40%;
+  --background:           213 43% 95%;
+  --foreground:           215 25% 18%;
+  --muted:                210 40% 96%;
+  --muted-foreground:     215 16% 47%;
+  --accent:               210 40% 96%;
+  --accent-foreground:    215 25% 18%;
+  --radius:               0.375rem;
+}
+[data-theme="dark"] {
+  --popover:              215 30% 8%;
+  --popover-foreground:   210 40% 88%;
+  --border:               215 32% 17%;
+  --input:                215 32% 17%;
+  --ring:                 203 89% 40%;
+  --background:           215 35% 5%;
+  --foreground:           210 40% 88%;
+  --muted:                215 30% 9%;
+  --muted-foreground:     215 20% 60%;
+  --accent:               215 30% 11%;
+  --accent-foreground:    210 40% 88%;
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; background: var(--bg-page); color: var(--text-1); transition: background 0.2s, color 0.2s; }
 
@@ -77,8 +106,35 @@ html, body { height: 100%; background: var(--bg-page); color: var(--text-1); tra
 [data-theme="dark"] input  { background-color: var(--input-bg)  !important; color: var(--text-1) !important; border-color: var(--border-1) !important; }
 [data-theme="dark"] input::placeholder { color: var(--text-3) !important; }
 
-[data-theme="dark"] .hover\:bg-\[\#f0f4ff\]:hover { background-color: #0d1525 !important; }
+[data-theme="dark"] .hover\:bg-\[\#f0f4ff\]:hover  { background-color: #0d1525 !important; }
 [data-theme="dark"] .hover\:bg-\[\#f1f5f9\]:hover  { background-color: var(--bg-surface3) !important; }
+[data-theme="dark"] .hover\:bg-\[\#f8fafc\]:hover  { background-color: var(--bg-surface2) !important; }
+
+/* ── Options chain header / row backgrounds ────────────────────────────── */
+[data-theme="dark"] .bg-\[\#e8f4ff\]  { background-color: #040d18 !important; }
+[data-theme="dark"] .bg-\[\#e8eef5\]  { background-color: #0a1020 !important; }
+[data-theme="dark"] .bg-\[\#fff0f3\]  { background-color: #150008 !important; }
+[data-theme="dark"] .bg-\[\#f8fbff\]  { background-color: #040d18 !important; }
+[data-theme="dark"] .bg-\[\#fff8fa\]  { background-color: #150008 !important; }
+[data-theme="dark"] .bg-\[\#eff6ff\]  { background-color: #051828 !important; }
+[data-theme="dark"] .bg-\[\#dbeafe\]  { background-color: #051828 !important; }
+[data-theme="dark"] .bg-\[\#f0f7ff\]  { background-color: #040d18 !important; }
+
+/* ── SMC / misc light-tinted backgrounds ───────────────────────────────── */
+[data-theme="dark"] .bg-\[\#fafbfc\]  { background-color: var(--bg-surface2) !important; }
+[data-theme="dark"] .bg-\[\#fef9ec\]  { background-color: #1c1500 !important; }
+[data-theme="dark"] .bg-\[\#f0fdf4\]  { background-color: #052e16 !important; }
+[data-theme="dark"] .bg-\[\#fef2f2\]  { background-color: #2d0505 !important; }
+[data-theme="dark"] .bg-\[\#dcfce7\]  { background-color: #052e16 !important; }
+
+/* ── Additional borders ────────────────────────────────────────────────── */
+[data-theme="dark"] .border-\[\#bbf7d0\]      { border-color: #166534 !important; }
+[data-theme="dark"] .border-\[\#fde68a\]      { border-color: #92400e !important; }
+[data-theme="dark"] .border-b-\[\#fde68a\]    { border-bottom-color: #92400e !important; }
+[data-theme="dark"] .border-\[\#e2e8f0\]      { border-color: var(--border-1) !important; }
+
+/* ── Watchlist metric dividers ─────────────────────────────────────────── */
+[data-theme="dark"] .divide-\[\#f1f5f9\] > :not([hidden]) ~ :not([hidden]) { border-color: var(--border-3) !important; }
 
 /* ── LIGHT MODE: override dark (results page) colors ─────────────────────── */
 [data-theme="light"] .bg-\[\#080b0f\]  { background-color: var(--bg-page)     !important; }

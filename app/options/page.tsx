@@ -11,6 +11,7 @@ import {
   type WatchedOption,
 } from "@/lib/options";
 import { smcApi, optionsApi, authApi, autoTradeApi, createWS, isDemoMode, AuthError } from "@/lib/api";
+import { LOT_SIZE } from "@/lib/constants";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ResultsContent } from "@/components/ResultsContent";
@@ -1699,7 +1700,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
   const total  = wins + losses;
   const wr     = total > 0 ? ((wins / total) * 100).toFixed(1) : null;
 
-  const LOT_QTY = 65; // NIFTY 1 lot = 65 qty
+  const LOT_QTY = LOT_SIZE;
 
   // concept pill color map
   const conceptColor: Record<string,string> = {
@@ -2064,7 +2065,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
       <div style={{ minWidth: "900px" }}>
       <div className="grid flex-shrink-0 border-b-2 border-[#cbd5e1] bg-[#f8fafc]"
         style={{ gridTemplateColumns: COLS }}>
-        {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS","P&L · LOT (65)","MAX PTS",""].map(h => (
+        {["#","TIME","SIGNALS","STRIKE","ENTRY","CMP","SL","T1","T2","STATUS",`P&L · LOT (${LOT_SIZE})`,"MAX PTS",""].map(h => (
           <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase" style={MONO}>{h}</div>
         ))}
       </div>
@@ -2221,7 +2222,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
                     <span className="text-[12px] font-bold tabular-nums" style={{...MONO, color:pnlColor}}>
                       {fmtLotPnl((a.currentPnL ?? 0) * LOT_QTY)}
                     </span>
-                    <span className="text-[7px] font-bold" style={{...MONO, color:pnlColor}}>×65</span>
+                    <span className="text-[7px] font-bold" style={{...MONO, color:pnlColor}}>×{LOT_SIZE}</span>
                   </div>
                   <div className="text-[8px]" style={{...MONO, color:pnlColor}}>
                     {pnlUp ? "+" : ""}{a.pnlPct?.toFixed(2) ?? "0.00"}%
@@ -2285,7 +2286,7 @@ function SMCTableView({ alerts, winRate, smcStatus, busy, authenticated, expiry,
               { label:"EOD / OPEN",    val:`${eod}`,                 color:"#b45309" },
               { label:"WIN RATE",      val:wr ? `${wr}%` : "—",     color:wr && Number(wr)>=70?"#16a34a":"#e11d48" },
               {
-                label: "LOT P&L (65×)",
+                label: `LOT P&L (${LOT_SIZE}×)`,
                 val:   tableAlerts.length > 0 ? fmtLotPnl(totalLotPnl) : "—",
                 color: totalLotPnl >= 0 ? "#16a34a" : "#e11d48",
                 sub:   active > 0 ? `realized ${fmtLotPnl(realizedLotPnl)}` : undefined,
@@ -2329,7 +2330,7 @@ function WatchlistRow({ watched, candles3m: _candles3m, expiry, onRemove }:
   const fill  = (t2 - sl) > 0 ? Math.min(Math.max(((ltp - sl) / (t2 - sl)) * 100, 0), 100) : 50;
   const t1Pct = (t2 - sl) > 0 ? Math.min(((t1 - sl) / (t2 - sl)) * 100, 100) : 67;
   const t1Hit = ltp >= t1 || isWin;
-  const lotPnl = currentPnL * 65;
+  const lotPnl = currentPnL * LOT_SIZE;
   const lotAbs = Math.abs(lotPnl);
   const lotStr = (lotPnl >= 0 ? "+" : "−") + "₹" + (lotAbs >= 1000 ? `${(lotAbs/1000).toFixed(1)}K` : lotAbs.toFixed(0));
 

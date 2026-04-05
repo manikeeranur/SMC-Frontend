@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTheme } from "@/lib/theme";
+import { LOT_SIZE } from "@/lib/constants";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
 
@@ -54,7 +55,7 @@ function fmtLotPnl(n: number) {
     : `${s}₹${abs.toFixed(0)}`;
 }
 
-const LOT_QTY = 65;
+const LOT_QTY = LOT_SIZE;
 const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 130px 65px";
 
 export function ResultsContent() {

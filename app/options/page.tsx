@@ -15,10 +15,11 @@ import { LOT_SIZE } from "@/lib/constants";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ResultsContent } from "@/components/ResultsContent";
+import { AccountTab } from "@/components/AccountTab";
 import {
   IconPower, IconCopy, IconCopyCheck, IconX,
   IconChartCandle, IconScan, IconStar, IconStarFilled,
-  IconLayoutGrid, IconChartLine, IconFileAnalytics,
+  IconLayoutGrid, IconChartLine, IconFileAnalytics, IconWallet,
 } from "@tabler/icons-react";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
@@ -50,7 +51,7 @@ function OptionsPageInner() {
   const [loading, setLoading]         = useState(false);
   const [strikeRange] = useState<5|10|15>(15);
   const [live,   setLive]             = useState(true);
-  const [activeTab, setActiveTab]     = useState<"chain"|"smc"|"watchlist"|"ohlc"|"results">("chain");
+  const [activeTab, setActiveTab]     = useState<"chain"|"smc"|"watchlist"|"ohlc"|"results"|"account">("chain");
   const [watchlist, setWatchlist]     = useState<WatchedOption[]>([]);
   const [smcAlerts,    setSmcAlerts]    = useState<any[]>([]);
   const [smcWinRate,   setSmcWinRate]   = useState<number|null>(null);
@@ -538,6 +539,7 @@ function OptionsPageInner() {
             { tab:"watchlist", icon:<IconStar size={20} />,          label:"Watch",  badge: watchlist.length || undefined },
             { tab:"ohlc",      icon:<IconChartLine size={20} />,     label:"OHLC" },
             { tab:"results",   icon:<IconFileAnalytics size={20} />, label:"Results" },
+            { tab:"account",   icon:<IconWallet size={20} />,        label:"Account" },
           ] as const).map(({ tab, icon, label, badge }: any) => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               title={label}
@@ -696,6 +698,11 @@ function OptionsPageInner() {
         {activeTab === "results" && (
           <ResultsContent />
         )}
+
+        {/* ── ACCOUNT ── */}
+        {activeTab === "account" && (
+          <AccountTab />
+        )}
         </div>
       </div>
 
@@ -738,6 +745,12 @@ function OptionsPageInner() {
           style={{ color: activeTab === "results" ? "#ea580c" : "#94a3b8" }}>
           <IconFileAnalytics size={22} />
           <span className="text-[8px]" style={MONO}>Results</span>
+        </button>
+        <button onClick={() => setActiveTab("account")}
+          className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "account" ? "#ea580c" : "#94a3b8" }}>
+          <IconWallet size={22} />
+          <span className="text-[8px]" style={MONO}>Account</span>
         </button>
       </nav>
 

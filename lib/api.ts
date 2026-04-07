@@ -89,6 +89,21 @@ export const autoTradeApi = {
   clear: () => req("/api/auto-trade/positions", { method: "DELETE" }),
 };
 
+export const accountApi = {
+  get: () => req<{
+    wallet:    { available: number; used: number; net: number };
+    charges:   { brokerage: number; stt: number; txn: number; clearing: number; gst: number; sebi: number; stampDuty: number; total: number };
+    pnl:       { realised: number; unrealised: number; total: number };
+    positions: Array<{
+      tradingsymbol: string; direction: string; strike: number | null;
+      quantity: number; buyPrice: number; sellPrice: number; currentPrice: number;
+      pnl: number; realisedPnl: number; unrealisedPnl: number; status: string;
+      atStatus: string | null;
+      entryTime: string | null; exitTime: string | null;
+    }>;
+  }>("/api/account"),
+};
+
 export const watchlistApi = {
   get: () => req<any[]>("/api/watchlist"),
   add: (leg: any) =>

@@ -90,16 +90,40 @@ export const autoTradeApi = {
 };
 
 export const accountApi = {
+  report: async (from: string, to: string, type: "trades" | "summary") => {
+    const res = await fetch(`${API}/api/account/report?from=${from}&to=${to}&type=${type}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `pnl_${type}_${from}_${to}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
   get: () => req<{
-    wallet:    { available: number; used: number; net: number };
-    charges:   { brokerage: number; stt: number; txn: number; clearing: number; gst: number; sebi: number; stampDuty: number; total: number };
+    wallet:    { available: number; used: number; net: number; deposit: number; withdrawal: number };
+    charges:   { brokerage: number; stt: number; exchange: number; sebi: number; gst: number; stampDuty: number; total: number };
     pnl:       { realised: number; unrealised: number; total: number };
     positions: Array<{
       tradingsymbol: string; direction: string; strike: number | null;
       quantity: number; buyPrice: number; sellPrice: number; currentPrice: number;
-      pnl: number; realisedPnl: number; unrealisedPnl: number; status: string;
-      atStatus: string | null;
+      pnl: number; status: string; atStatus: string | null;
       entryTime: string | null; exitTime: string | null;
+      durationSecs: number | null;
+    }>;
+    stats: {
+      totalTrades: number; openTrades: number;
+      winners: number; losers: number;
+      winRate: number; avgPnl: number;
+    };
+    orderBook: Array<{
+      order_id: string; tradingsymbol: string; transaction_type: string;
+      quantity: number; price: number; trigger_price: number;
+      order_type: string; status: string; time: string | null;
     }>;
   }>("/api/account"),
 };

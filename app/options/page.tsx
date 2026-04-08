@@ -534,12 +534,12 @@ function OptionsPageInner() {
         {/* ── Desktop left sidebar (hidden on mobile) ── */}
         <nav className="hidden md:flex flex-col items-center w-[60px] py-3 gap-1 bg-white border-r border-[#e2e8f0] flex-shrink-0">
           {([
+            { tab:"account",   icon:<IconWallet size={20} />,        label:"Account" },
             { tab:"chain",     icon:<IconLayoutGrid size={20} />,    label:"Chain" },
             { tab:"smc",       icon:<IconScan size={20} />,          label:"SMC",    badge: smcAlerts.length || undefined },
             { tab:"watchlist", icon:<IconStar size={20} />,          label:"Watch",  badge: watchlist.length || undefined },
             { tab:"ohlc",      icon:<IconChartLine size={20} />,     label:"OHLC" },
             { tab:"results",   icon:<IconFileAnalytics size={20} />, label:"Results" },
-            { tab:"account",   icon:<IconWallet size={20} />,        label:"Account" },
           ] as const).map(({ tab, icon, label, badge }: any) => (
             <button key={tab} onClick={() => setActiveTab(tab)}
               title={label}
@@ -708,6 +708,12 @@ function OptionsPageInner() {
 
       {/* ── Mobile bottom nav (hidden on md+) ── */}
       <nav className="md:hidden flex items-center justify-around h-14 bg-white border-t border-[#e2e8f0] flex-shrink-0">
+        <button onClick={() => setActiveTab("account")}
+          className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "account" ? "#ea580c" : "#94a3b8" }}>
+          <IconWallet size={22} />
+          <span className="text-[8px]" style={MONO}>Account</span>
+        </button>
         <button onClick={() => setActiveTab("chain")}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "chain" ? "#ea580c" : "#94a3b8" }}>
@@ -745,12 +751,6 @@ function OptionsPageInner() {
           style={{ color: activeTab === "results" ? "#ea580c" : "#94a3b8" }}>
           <IconFileAnalytics size={22} />
           <span className="text-[8px]" style={MONO}>Results</span>
-        </button>
-        <button onClick={() => setActiveTab("account")}
-          className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
-          style={{ color: activeTab === "account" ? "#ea580c" : "#94a3b8" }}>
-          <IconWallet size={22} />
-          <span className="text-[8px]" style={MONO}>Account</span>
         </button>
       </nav>
 

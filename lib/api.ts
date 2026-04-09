@@ -90,6 +90,23 @@ export const autoTradeApi = {
 };
 
 export const accountApi = {
+  livePositions: () => req<{
+    positions: Array<{
+      tradingsymbol: string; direction: string; strike: number | null;
+      quantity: number; buyPrice: number; sellPrice: number; currentPrice: number;
+      pnl: number; status: string; atStatus: string | null;
+      entryTime: string | null; exitTime: string | null; durationSecs: number | null;
+    }>;
+  }>("/api/account/positions"),
+  exitPosition: (tradingsymbol: string, quantity: number) =>
+    req<{ order_id: string; tradingsymbol: string; quantity: number }>("/api/account/exit", {
+      method: "POST",
+      body: JSON.stringify({ tradingsymbol, quantity }),
+    }),
+  exitAll: () =>
+    req<{ exited: Array<{ tradingsymbol: string; order_id?: string; error?: string; ok: boolean }> }>(
+      "/api/account/exit-all", { method: "POST" }
+    ),
   report: async (from: string, to: string, type: "trades" | "summary") => {
     const res = await fetch(`${API}/api/account/report?from=${from}&to=${to}&type=${type}`);
     if (!res.ok) {

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { accountApi } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { IconRefresh, IconWallet, IconReceipt, IconChartBar, IconList, IconDownload, IconClock,
-         IconArrowUpRight, IconArrowDownLeft, IconPercentage, IconMinus } from "@tabler/icons-react";
+         IconArrowUpRight, IconArrowDownLeft, IconPercentage, IconX, IconPower } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
 
@@ -81,7 +81,11 @@ function formatSymbol(sym: string): string {
 }
 
 // ─── Position card ────────────────────────────────────────────────────────────
-function PositionCard({ p }: { p: Position }) {
+function PositionCard({ p, onExit, isExiting }: {
+  p: Position;
+  onExit?: () => void;
+  isExiting?: boolean;
+}) {
   const { theme } = useTheme();
   const isDark  = theme === "dark";
   const border  = isDark ? "#1e293b" : "#e2e8f0";
@@ -137,6 +141,24 @@ function PositionCard({ p }: { p: Position }) {
           </span>
           <span className="text-[9px]" style={{ ...MONO, color: subtext }}>P&amp;L</span>
         </div>
+
+        {/* Exit button — only for OPEN positions */}
+        {isOpen && onExit && (
+          <div className="flex items-center px-2 border-l" style={{ borderColor: border }}>
+            <button
+              onClick={onExit}
+              disabled={isExiting}
+              title="Exit position at market"
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50 transition-opacity"
+              style={{ ...MONO, background: "#e11d48", color: "#fff" }}
+            >
+              {isExiting
+                ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                : <IconX size={11} />}
+              {isExiting ? "" : "EXIT"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ── Times ── */}
@@ -359,9 +381,13 @@ export function AccountTab() {
   const muted   = isDark ? "#94a3b8" : "#64748b";
   const text    = isDark ? "#e2e8f0" : "#1e293b";
 
-  const [data,    setData]    = useState<AccountData | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState("");
+  const [data,          setData]          = useState<AccountData | null>(null);
+  const [loading,       setLoading]       = useState(false);
+  const [error,         setError]         = useState("");
+  const [livePositions, setLivePositions] = useState<AccountData["positions"] | null>(null);
+  const [exitingSet,    setExitingSet]    = useState<Set<string>>(new Set());
+  const [exitAllBusy,   setExitAllBusy]   = useState(false);
+  const [exitError,     setExitError]     = useState("");
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -371,6 +397,50 @@ export function AccountTab() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // ── 1-second live positions polling ────────────────────────────────────────
+  useEffect(() => {
+    let active = true;
+    const poll = async () => {
+      try {
+        const res = await accountApi.livePositions();
+        if (active) setLivePositions(res.positions);
+      } catch {}
+    };
+    poll(); // immediate first fetch
+    const id = setInterval(poll, 1000);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  const displayPositions = livePositions ?? data?.positions ?? [];
+
+  // ── Exit a single position ─────────────────────────────────────────────────
+  async function handleExit(tradingsymbol: string, quantity: number) {
+    setExitError("");
+    setExitingSet(prev => new Set([...prev, tradingsymbol]));
+    try {
+      await accountApi.exitPosition(tradingsymbol, quantity);
+      load();
+    } catch (e: any) {
+      setExitError(`Exit failed: ${e.message}`);
+    } finally {
+      setExitingSet(prev => { const n = new Set(prev); n.delete(tradingsymbol); return n; });
+    }
+  }
+
+  // ── Exit all open positions ────────────────────────────────────────────────
+  async function handleExitAll() {
+    setExitError("");
+    setExitAllBusy(true);
+    try {
+      await accountApi.exitAll();
+      load();
+    } catch (e: any) {
+      setExitError(`Exit All failed: ${e.message}`);
+    } finally {
+      setExitAllBusy(false);
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto px-3 py-3">
@@ -581,15 +651,43 @@ export function AccountTab() {
 
           {/* ── Positions header ── */}
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[10px] font-bold tracking-[1.5px] uppercase" style={{ ...MONO, color: subtext }}>
-              Today's Positions
-            </span>
-            <span className="text-[10px]" style={{ ...MONO, color: subtext }}>
-              {data.positions.length} position{data.positions.length !== 1 ? "s" : ""}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold tracking-[1.5px] uppercase" style={{ ...MONO, color: subtext }}>
+                Today's Positions
+              </span>
+              <span className="text-[8px] font-bold px-1.5 py-0.5 rounded"
+                style={{ ...MONO, background: "#16a34a22", color: "#16a34a" }}>
+                LIVE
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              {displayPositions.some(p => p.status === "OPEN") && (
+                <button
+                  onClick={handleExitAll}
+                  disabled={exitAllBusy}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50"
+                  style={{ ...MONO, background: "#e11d48", color: "#fff" }}
+                >
+                  {exitAllBusy
+                    ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
+                    : <IconPower size={11} />}
+                  Exit All Positions
+                </button>
+              )}
+              <span className="text-[10px]" style={{ ...MONO, color: subtext }}>
+                {displayPositions.length} position{displayPositions.length !== 1 ? "s" : ""}
+              </span>
+            </div>
           </div>
 
-          {data.positions.length === 0 ? (
+          {exitError && (
+            <div className="mb-3 px-3 py-2 rounded-lg text-[10px]"
+              style={{ background: "#e11d4815", border: "1px solid #e11d4840", ...MONO, color: "#e11d48" }}>
+              {exitError}
+            </div>
+          )}
+
+          {displayPositions.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 gap-2 rounded-xl border"
               style={{ borderColor: border, background: isDark ? "#0f172a" : "#fff" }}>
               <span className="text-3xl" style={{ color: isDark ? "#1e293b" : "#e2e8f0" }}>◈</span>
@@ -597,7 +695,14 @@ export function AccountTab() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-5">
-              {data.positions.map((p, i) => <PositionCard key={i} p={p} />)}
+              {displayPositions.map((p, i) => (
+                <PositionCard
+                  key={i}
+                  p={p}
+                  onExit={p.status === "OPEN" ? () => handleExit(p.tradingsymbol, p.quantity) : undefined}
+                  isExiting={exitingSet.has(p.tradingsymbol)}
+                />
+              ))}
             </div>
           )}
 

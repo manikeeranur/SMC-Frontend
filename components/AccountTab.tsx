@@ -400,15 +400,21 @@ export function AccountTab() {
 
   // ── 1-second live positions polling ────────────────────────────────────────
   useEffect(() => {
-    let active = true;
+    let active  = true;
+    let running = false; // guard: skip tick if previous one is still in-flight
+
     const poll = async () => {
+      if (running) return;
+      running = true;
       try {
         const res = await accountApi.livePositions();
         if (active) setLivePositions(res.positions);
       } catch {}
+      finally { running = false; }
     };
+
     poll(); // immediate first fetch
-    const id = setInterval(poll, 1000);
+    const id = setInterval(poll, 500);
     return () => { active = false; clearInterval(id); };
   }, []);
 

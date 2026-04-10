@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { accountApi } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { IconRefresh, IconWallet, IconReceipt, IconChartBar, IconList, IconDownload, IconClock,
-         IconArrowUpRight, IconArrowDownLeft, IconPercentage, IconX, IconPower } from "@tabler/icons-react";
+         IconArrowUpRight, IconArrowDownLeft, IconPercentage, IconX, IconPower, IconXboxX } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
 
@@ -41,6 +41,71 @@ function SCard({ title, icon, accent, children }: {
         {children}
       </div>
     </div>
+  );
+}
+
+// ─── Full-screen mobile card modal ───────────────────────────────────────────
+function CardModal({ title, icon, accent, onClose, children }: {
+  title: string; icon: React.ReactNode; accent: string; onClose: () => void; children: React.ReactNode;
+}) {
+  const { theme } = useTheme();
+  const isDark  = theme === "dark";
+  const bg      = isDark ? "#080e1a" : "#f8fafc";
+  const border  = isDark ? "#1e293b" : "#e2e8f0";
+  const subtext = isDark ? "#64748b" : "#94a3b8";
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: bg }}>
+      <div className="flex items-center justify-between px-4 py-3 border-b flex-shrink-0"
+        style={{ borderColor: border, background: isDark ? "#0f172a" : "#fff" }}>
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-xl flex items-center justify-center"
+            style={{ background: `${accent}22` }}>
+            <span style={{ color: accent }}>{icon}</span>
+          </div>
+          <span className="text-[12px] font-bold tracking-[1.5px] uppercase"
+            style={{ ...MONO, color: subtext }}>{title}</span>
+        </div>
+        <button onClick={onClose}
+          className="p-1.5 rounded-lg active:scale-95 transition-transform"
+          style={{ background: isDark ? "#1e293b" : "#f1f5f9" }}>
+          <IconXboxX size={18} style={{ color: subtext }} />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── Compact mobile summary card ─────────────────────────────────────────────
+function MobileCompactCard({ title, icon, accent, onClick, children }: {
+  title: string; icon: React.ReactNode; accent: string; onClick: () => void; children: React.ReactNode;
+}) {
+  const { theme } = useTheme();
+  const isDark  = theme === "dark";
+  const bg      = isDark ? "#0f172a" : "#fff";
+  const border  = isDark ? "#1e293b" : "#e2e8f0";
+  const subtext = isDark ? "#64748b" : "#94a3b8";
+  return (
+    <button onClick={onClick}
+      className="rounded-xl border flex flex-col overflow-hidden w-full text-left active:scale-95 transition-transform"
+      style={{ background: bg, borderColor: border, borderTop: `2px solid ${accent}` }}>
+      <div className="flex items-center gap-1 px-2 pt-2.5 pb-1">
+        <div className="w-5 h-5 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: `${accent}22` }}>
+          <span style={{ color: accent, display: "flex" }}>{icon}</span>
+        </div>
+        <span className="text-[7px] font-bold tracking-[1px] uppercase truncate"
+          style={{ ...MONO, color: subtext }}>{title}</span>
+      </div>
+      <div className="px-2 pb-2.5">{children}</div>
+    </button>
   );
 }
 
@@ -388,6 +453,7 @@ export function AccountTab() {
   const [exitingSet,    setExitingSet]    = useState<Set<string>>(new Set());
   const [exitAllBusy,   setExitAllBusy]   = useState(false);
   const [exitError,     setExitError]     = useState("");
+  const [activeModal,   setActiveModal]   = useState<"wallet" | "charges" | "pnl" | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -481,7 +547,39 @@ export function AccountTab() {
       {data && (
         <>
           {/* ── 3 summary cards ── */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+
+          {/* Mobile: compact 3-col row (tap to open full modal) */}
+          <div className="grid grid-cols-3 gap-2 mb-5 md:hidden">
+            <MobileCompactCard title="Wallet" icon={<IconWallet size={12} />} accent="#16a34a" onClick={() => setActiveModal("wallet")}>
+              <div className="text-[12px] font-black leading-tight truncate" style={{ ...MONO, color: "#16a34a" }}>
+                ₹{fmt(data.wallet.available)}
+              </div>
+              <div className="text-[7px] mt-0.5" style={{ ...MONO, color: subtext }}>Available</div>
+            </MobileCompactCard>
+            <MobileCompactCard title="Charges" icon={<IconReceipt size={12} />} accent="#f59e0b" onClick={() => setActiveModal("charges")}>
+              <div className="text-[12px] font-black leading-tight truncate" style={{ ...MONO, color: "#f59e0b" }}>
+                ₹{fmt(data.charges.total)}
+              </div>
+              <div className="text-[7px] mt-0.5" style={{ ...MONO, color: subtext }}>Total</div>
+            </MobileCompactCard>
+            <MobileCompactCard title="P&L" icon={<IconChartBar size={12} />} accent="#ea580c" onClick={() => setActiveModal("pnl")}>
+              {(() => {
+                const net = +(data.pnl.unrealised - data.charges.total).toFixed(2);
+                return (
+                  <>
+                    <div className="text-[12px] font-black leading-tight truncate"
+                      style={{ ...MONO, color: net >= 0 ? "#16a34a" : "#e11d48" }}>
+                      {net >= 0 ? "+" : ""}₹{fmt(Math.abs(net))}
+                    </div>
+                    <div className="text-[7px] mt-0.5" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>Net</div>
+                  </>
+                );
+              })()}
+            </MobileCompactCard>
+          </div>
+
+          {/* Desktop: full cards (unchanged) */}
+          <div className="hidden md:grid md:grid-cols-3 gap-3 mb-5">
 
             {/* ── Wallet ── */}
             <SCard title="Wallet" icon={<IconWallet size={16} />} accent="#16a34a">
@@ -636,6 +734,141 @@ export function AccountTab() {
               })()}
             </SCard>
           </div>
+
+          {/* Mobile full-screen modals */}
+          {activeModal === "wallet" && (
+            <CardModal title="Wallet" icon={<IconWallet size={18} />} accent="#16a34a" onClose={() => setActiveModal(null)}>
+              <div className="px-4 pt-4 pb-3">
+                <div className="text-[28px] font-black leading-none" style={{ ...MONO, color: "#16a34a" }}>
+                  ₹{fmt(data.wallet.available)}
+                </div>
+                <div className="text-[10px] mt-0.5" style={{ ...MONO, color: subtext }}>Available Balance</div>
+              </div>
+              <div className="border-t" style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
+                {([
+                  { label: "Used Margin", val: `₹${fmt(data.wallet.used)}`,  color: "#f59e0b" },
+                  { label: "Net Balance", val: `₹${fmt(data.wallet.net)}`,   color: muted     },
+                ] as { label: string; val: string; color: string }[]).map(({ label, val, color }) => (
+                  <div key={label} className="flex items-center justify-between px-4 py-2.5 border-b"
+                    style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+                    <span className="text-[10px]" style={{ ...MONO, color: subtext }}>{label}</span>
+                    <span className="text-[13px] font-bold" style={{ ...MONO, color }}>{val}</span>
+                  </div>
+                ))}
+                <div className="flex border-b" style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+                  <div className="flex-1 flex items-center gap-1.5 px-4 py-2.5 border-r"
+                    style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+                    <IconArrowDownLeft size={12} color="#16a34a" />
+                    <span className="text-[10px]" style={{ ...MONO, color: subtext }}>Deposit</span>
+                    <span className="ml-auto text-[13px] font-bold"
+                      style={{ ...MONO, color: data.wallet.deposit > 0 ? "#16a34a" : muted }}>
+                      ₹{fmt(data.wallet.deposit)}
+                    </span>
+                  </div>
+                  <div className="flex-1 flex items-center gap-1.5 px-4 py-2.5">
+                    <IconArrowUpRight size={12} color="#e11d48" />
+                    <span className="text-[10px]" style={{ ...MONO, color: subtext }}>Withdrawal</span>
+                    <span className="ml-auto text-[13px] font-bold"
+                      style={{ ...MONO, color: data.wallet.withdrawal > 0 ? "#e11d48" : muted }}>
+                      ₹{fmt(data.wallet.withdrawal)}
+                    </span>
+                  </div>
+                </div>
+                {(() => {
+                  const total    = data.wallet.used + data.wallet.available;
+                  const pct      = total > 0 ? Math.min(100, +(data.wallet.used / total * 100).toFixed(1)) : 0;
+                  const barColor = pct > 80 ? "#e11d48" : pct > 50 ? "#f59e0b" : "#16a34a";
+                  return (
+                    <div className="px-4 py-4 flex flex-col gap-2">
+                      <div className="flex justify-between text-[10px]" style={MONO}>
+                        <span style={{ color: subtext }}>Margin Utilisation</span>
+                        <span style={{ color: barColor, fontWeight: 700 }}>{pct}%</span>
+                      </div>
+                      <div className="h-3 rounded-full overflow-hidden" style={{ background: isDark ? "#1e293b" : "#f1f5f9" }}>
+                        <div className="h-full rounded-full transition-all duration-500"
+                          style={{ width: `${pct}%`, background: barColor }} />
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            </CardModal>
+          )}
+
+          {activeModal === "charges" && (
+            <CardModal title="Charges Today" icon={<IconReceipt size={18} />} accent="#f59e0b" onClose={() => setActiveModal(null)}>
+              <div className="px-4 pt-4 pb-3">
+                <div className="text-[28px] font-black leading-none" style={{ ...MONO, color: "#f59e0b" }}>
+                  ₹{fmt(data.charges.total)}
+                </div>
+                <div className="text-[10px] mt-0.5" style={{ ...MONO, color: subtext }}>Total Charges</div>
+              </div>
+              <div className="border-t" style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
+                {([
+                  ["Brokerage",         data.charges.brokerage],
+                  ["STT",               data.charges.stt],
+                  ["Exchange Turnover", data.charges.exchange],
+                  ["SEBI Turnover",     data.charges.sebi],
+                  ["GST",               data.charges.gst],
+                  ["Stamp Duty",        data.charges.stampDuty],
+                ] as [string, number][]).map(([l, v], i, arr) => (
+                  <div key={l}
+                    className={`flex items-center justify-between px-4 py-2.5 ${i < arr.length - 1 ? "border-b" : ""}`}
+                    style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+                    <span className="text-[10px]" style={{ ...MONO, color: subtext }}>{l}</span>
+                    <span className="text-[13px] font-bold" style={{ ...MONO, color: muted }}>₹{fmt(v)}</span>
+                  </div>
+                ))}
+              </div>
+            </CardModal>
+          )}
+
+          {activeModal === "pnl" && (
+            <CardModal title="Overall P&L" icon={<IconChartBar size={18} />} accent="#ea580c" onClose={() => setActiveModal(null)}>
+              {(() => {
+                const net = +(data.pnl.unrealised - data.charges.total).toFixed(2);
+                return (
+                  <>
+                    <div className="px-4 pt-4 pb-3">
+                      <div className="text-[28px] font-black leading-none"
+                        style={{ ...MONO, color: data.pnl.total >= 0 ? "#16a34a" : "#e11d48" }}>
+                        {data.pnl.total >= 0 ? "+" : ""}₹{fmt(data.pnl.total)}
+                      </div>
+                      <div className="text-[10px] mt-0.5" style={{ ...MONO, color: subtext }}>Gross P&amp;L (Today)</div>
+                    </div>
+                    <div className="border-t" style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
+                      {([
+                        { label: "Realised",   val: data.pnl.realised,   sign: true },
+                        { label: "Unrealised", val: data.pnl.unrealised, sign: true },
+                        { label: "Charges",    val: -data.charges.total, sign: false, display: `-₹${fmt(data.charges.total)}` },
+                      ] as { label: string; val: number; sign: boolean; display?: string }[]).map(({ label, val, sign, display }) => (
+                        <div key={label} className="flex items-center justify-between px-4 py-2.5 border-b"
+                          style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+                          <span className="text-[10px]" style={{ ...MONO, color: subtext }}>{label}</span>
+                          <span className="text-[13px] font-bold"
+                            style={{ ...MONO, color: val >= 0 ? (sign ? "#16a34a" : "#e11d48") : "#e11d48" }}>
+                            {display ?? `${val >= 0 && sign ? "+" : ""}₹${fmt(Math.abs(val))}`}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between px-4 py-4"
+                        style={{ background: net >= 0 ? "#16a34a12" : "#e11d4812" }}>
+                        <div className="flex items-center gap-1.5">
+                          <IconPercentage size={13} style={{ color: net >= 0 ? "#16a34a" : "#e11d48" }} />
+                          <span className="text-[11px] font-bold" style={{ ...MONO, color: net >= 0 ? "#16a34a" : "#e11d48" }}>
+                            Net (after charges)
+                          </span>
+                        </div>
+                        <span className="text-[16px] font-black" style={{ ...MONO, color: net >= 0 ? "#16a34a" : "#e11d48" }}>
+                          {net >= 0 ? "+" : ""}₹{fmt(net)}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </CardModal>
+          )}
 
           {/* ── Win rate stats ── */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">

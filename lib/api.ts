@@ -23,14 +23,18 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 export const authApi = {
-  status: () => req<{ authenticated: boolean }>("/api/auth/status"),
+  status:   () => req<{ authenticated: boolean }>("/api/auth/status"),
   loginUrl: () => req<{ loginUrl: string }>("/api/auth/login"),
   setToken: (t: string) =>
     req("/api/auth/token", {
       method: "POST",
       body: JSON.stringify({ access_token: t }),
     }),
-  logout: () => req("/api/auth/logout", { method: "POST" }),
+  logout:  () => req("/api/auth/logout", { method: "POST" }),
+  profile: () => req<{
+    user_id: string; user_name: string; email: string | null;
+    avatar_url: string | null; broker: string;
+  }>("/api/auth/profile"),
 };
 
 export const optionsApi = {

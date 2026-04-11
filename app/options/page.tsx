@@ -18,12 +18,34 @@ import { ResultsContent } from "@/components/ResultsContent";
 import { AccountTab } from "@/components/AccountTab";
 import {
   IconPower, IconCopy, IconCopyCheck, IconX,
-  IconChartCandle, IconScan, IconStar, IconStarFilled,
+  IconChartCandle, IconScan, IconBookmark, IconBookmarkFilled,
   IconLayoutGrid, IconChartLine, IconFileAnalytics, IconWallet,
 } from "@tabler/icons-react";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
+
+const MARKET_HOLIDAYS_2026: { date: string; name: string }[] = [
+  { date: "2026-01-26", name: "Republic Day" },
+  { date: "2026-02-18", name: "Mahashivratri" },
+  { date: "2026-03-20", name: "Holi" },
+  { date: "2026-04-03", name: "Good Friday" },
+  { date: "2026-04-14", name: "Dr. Ambedkar Jayanti" },
+  { date: "2026-05-01", name: "Maharashtra Day" },
+  { date: "2026-05-19", name: "Buddha Purnima" },
+  { date: "2026-06-16", name: "Eid-ul-Adha" },
+  { date: "2026-10-02", name: "Gandhi Jayanti" },
+  { date: "2026-10-22", name: "Dussehra" },
+  { date: "2026-11-10", name: "Diwali — Laxmi Puja" },
+  { date: "2026-11-11", name: "Diwali — Balipratipada" },
+  { date: "2026-11-30", name: "Guru Nanak Jayanti" },
+  { date: "2026-12-25", name: "Christmas" },
+];
+const DAY_NAMES = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+function holidayDayName(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  return DAY_NAMES[d.getDay()];
+}
 
 function Pill({ label, color }: { label: string; color: string }) {
   return (
@@ -73,6 +95,9 @@ function OptionsPageInner() {
   const [liveUser, setLiveUser]       = useState(kiteUser);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [hydrated, setHydrated]       = useState(false);
+  const [drawerOpen, setDrawerOpen]   = useState(false);
+  const [holidaysOpen, setHolidaysOpen] = useState(false);
+  const [kiteProfile, setKiteProfile] = useState<{ user_id: string; user_name: string; email: string | null; avatar_url: string | null; broker: string } | null>(null);
   const [justLoggedIn, setJustLoggedIn] = useState(kiteStatus === "connected");
   const [ohlcDate, setOhlcDate]       = useState(() => new Date().toISOString().split("T")[0]);
   const [ohlcCE,   setOhlcCE]         = useState<{token:number; strike:number} | null>(null);
@@ -147,6 +172,12 @@ function OptionsPageInner() {
   }, [kiteStatus, kiteUser]);
 
   useEffect(() => { if (isDemoMode && expiries.length && !expiry) setExpiry(expiries[0]); }, [expiries, expiry]);
+
+  // ── Fetch Kite profile once authenticated ──────────────────────────────────
+  useEffect(() => {
+    if (!authenticated || isDemoMode) return;
+    authApi.profile().then(setKiteProfile).catch(() => {});
+  }, [authenticated]);
 
 
   // ── WebSocket ───────────────────────────────────────────────────────────────
@@ -488,43 +519,136 @@ function OptionsPageInner() {
     );
   }
 
+  // ── Avatar helper (used in header + drawer) ───────────────────────────────
+  const profileInitials = kiteProfile
+    ? kiteProfile.user_name.trim().split(/\s+/).map(w => w.charAt(0)).join("").slice(0, 2).toUpperCase()
+    : liveUser
+      ? liveUser.trim().split(/\s+/).map((w: string) => w.charAt(0)).join("").slice(0, 2).toUpperCase()
+      : "?";
+
+  function ProfileAvatar({ size }: { size: number }) {
+    const initialsNode = (
+      <div className="rounded-full flex items-center justify-center font-black flex-shrink-0"
+        style={{ width: size, height: size, background: "#ea580c22", color: "#ea580c",
+          fontSize: size * 0.35, lineHeight: 1 }}>
+        {profileInitials}
+      </div>
+    );
+    if (kiteProfile?.avatar_url) {
+      return (
+        <img
+          src={kiteProfile.avatar_url}
+          alt={kiteProfile.user_name}
+          className="rounded-full object-cover flex-shrink-0 ring-2 ring-[#ea580c]/20"
+          style={{ width: size, height: size }}
+          onError={e => {
+            // If the image fails to load, replace with initials div
+            const el = e.currentTarget;
+            el.style.display = "none";
+            el.insertAdjacentHTML("afterend",
+              `<div style="width:${size}px;height:${size}px;background:#ea580c22;color:#ea580c;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:${Math.round(size*0.35)}px;flex-shrink:0">${profileInitials}</div>`
+            );
+          }}
+        />
+      );
+    }
+    return initialsNode;
+  }
+
   return (
     <div className="flex flex-col h-screen bg-[#f0f4f8] overflow-hidden" style={{ fontFamily:"'DM Sans',sans-serif" }}>
 
       {/* ══ HEADER ══ */}
-      <header className="flex items-center px-3 md:px-5 h-[52px] bg-white border-b border-[#cbd5e1] flex-shrink-0 gap-3">
-        {/* Left: logo */}
-        <div className="flex items-center flex-shrink-0">
-          <img src="/logo.png" alt="ALGO.BOT" className="h-8 md:h-9 w-auto object-contain" />
+      <header className="flex items-center px-3 md:px-5 h-[52px] flex-shrink-0 gap-3"
+        style={{ background: isDark ? "#0f172a" : "#fff", borderBottom: `1px solid ${isDark ? "#1e293b" : "#cbd5e1"}` }}>
+        {/* Left: profile avatar (mobile, opens drawer) / logo (desktop) */}
+        <button className="md:hidden flex items-center gap-2 cursor-pointer focus:outline-none min-w-0 flex-shrink-0"
+          onClick={() => setDrawerOpen(true)}>
+          <ProfileAvatar size={32} />
+          {(kiteProfile?.user_name || liveUser) && (
+            <div className="flex flex-col items-start min-w-0">
+              <span className="text-[11px] font-bold truncate max-w-[110px] leading-tight"
+                style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                {kiteProfile?.user_name || liveUser}
+              </span>
+              {kiteProfile?.user_id && (
+                <span className="text-[9px] leading-tight" style={{ ...MONO, color: "#64748b" }}>
+                  {kiteProfile.user_id}
+                </span>
+              )}
+            </div>
+          )}
+        </button>
+        {/* Desktop: profile details */}
+        <div className="hidden md:flex items-center gap-2.5 flex-shrink-0">
+          <ProfileAvatar size={34} />
+          {(kiteProfile?.user_name || liveUser) ? (
+            <div className="flex flex-col items-start min-w-0">
+              <span className="text-[12px] font-bold leading-tight truncate max-w-[160px]"
+                style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                {kiteProfile?.user_name || liveUser}
+              </span>
+              {kiteProfile?.user_id && (
+                <span className="text-[9px] leading-tight" style={{ ...MONO, color: "#64748b" }}>
+                  {kiteProfile.user_id}
+                </span>
+              )}
+            </div>
+          ) : (
+            <img src="/logo.png" alt="ALGO.BOT" className="h-9 w-auto object-contain" />
+          )}
         </div>
         <div className="flex-1" />
 
-        {/* Right: controls (never shrinks) */}
+        {/* Right: controls */}
         <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
           {isDemoMode && <Pill label="DEMO" color="#ea580c" />}
 
-          <select value={expiry} onChange={e => setExpiry(e.target.value)}
-            className="bg-[#f1f5f9] border border-[#cbd5e1] text-[#1e293b] px-2 py-1.5 text-[10px] rounded-sm outline-none cursor-pointer" style={MONO}>
-            {expiries.map(e => <option key={e} value={e}>{e}</option>)}
-          </select>
+          <div className="hidden md:block">
+            <Select value={expiry} onValueChange={setExpiry}>
+              <SelectTrigger className="h-7 px-2 text-[10px] rounded-sm border w-[130px]"
+                style={{ ...MONO, background: isDark ? "#1e293b" : "#f1f5f9", borderColor: isDark ? "#334155" : "#cbd5e1", color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {expiries.map(e => <SelectItem key={e} value={e} style={MONO}>{e}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
 
           <span className="hidden sm:block text-[11px] text-[#ea580c] flex-shrink-0" style={MONO}>{data?.daysToExpiry.toFixed(1) ?? "—"}d</span>
 
           <button onClick={() => setLive(v => !v)}
-            className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors flex-shrink-0 ${live?"bg-[#16a34a]/10 border-[#16a34a] text-[#16a34a]":"bg-transparent border-[#cbd5e1] text-[#64748b]"}`} style={MONO}>
-            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${live?"bg-[#16a34a] live-pulse":"bg-[#94a3b8]"}`} />
+            className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 text-[10px] rounded-sm border cursor-pointer transition-colors flex-shrink-0 ${live ? "bg-[#16a34a]/10 border-[#16a34a] text-[#16a34a]" : "bg-transparent text-[#64748b]"}`}
+            style={{ ...(live ? {} : { borderColor: isDark ? "#334155" : "#cbd5e1" }), ...MONO }}>
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${live ? "bg-[#16a34a] live-pulse" : "bg-[#94a3b8]"}`} />
             <span className="hidden sm:inline">{live ? "LIVE" : "PAUSED"}</span>
           </button>
 
-          {/* Logout + ThemeToggle — mobile top right */}
-          {!isDemoMode && authenticated && (
-            <button onClick={handleLogout}
-              className="md:hidden flex items-center justify-center w-7 h-7 rounded cursor-pointer text-[#e11d48]/60 hover:text-[#e11d48] transition-colors"
-              title="Logout">
-              <IconPower size={16} />
-            </button>
-          )}
-          <ThemeToggle />
+          {/* Today: day / date / market status — rightmost */}
+          {(() => {
+            const now       = new Date();
+            const todayStr  = now.toISOString().split("T")[0];
+            const dayIdx    = now.getDay();
+            const dayLabel  = DAY_NAMES[dayIdx];
+            const [, mm, dd] = todayStr.split("-");
+            const monthAbbr = ["","JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][+mm];
+            const isWeekend = dayIdx === 0 || dayIdx === 6;
+            const holiday   = MARKET_HOLIDAYS_2026.find(h => h.date === todayStr);
+            const status    = holiday ? "HOLIDAY" : isWeekend ? "WEEKEND" : "WORKING";
+            const statusClr = (holiday || isWeekend) ? "#e11d48" : "#16a34a";
+            return (
+              <div className="flex flex-col items-end flex-shrink-0 leading-none gap-0.5">
+                <div className="flex items-baseline gap-1">
+                  <span className="text-[11px] font-black" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>{dayLabel}</span>
+                  <span className="text-[10px] font-bold" style={{ ...MONO, color: isDark ? "#94a3b8" : "#64748b" }}>{dd} {monthAbbr}</span>
+                </div>
+                <span className="text-[7.5px] font-bold tracking-[0.8px]" style={{ ...MONO, color: statusClr }}>
+                  {holiday ? holiday.name.toUpperCase().slice(0, 14) : status}
+                </span>
+              </div>
+            );
+          })()}
         </div>
       </header>
 
@@ -532,12 +656,13 @@ function OptionsPageInner() {
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Desktop left sidebar (hidden on mobile) ── */}
-        <nav className="hidden md:flex flex-col items-center w-[60px] py-3 gap-1 bg-white border-r border-[#e2e8f0] flex-shrink-0">
+        <nav className="hidden md:flex flex-col items-center w-[60px] py-3 gap-1 flex-shrink-0"
+          style={{ background: isDark ? "#0f172a" : "#fff", borderRight: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
           {([
             { tab:"account",   icon:<IconWallet size={20} />,        label:"Account" },
             { tab:"chain",     icon:<IconLayoutGrid size={20} />,    label:"Chain" },
             { tab:"smc",       icon:<IconScan size={20} />,          label:"SMC",    badge: smcAlerts.length || undefined },
-            { tab:"watchlist", icon:<IconStar size={20} />,          label:"Watch",  badge: watchlist.length || undefined },
+            { tab:"watchlist", icon:<IconBookmark size={20} />,       label:"Watch",  badge: watchlist.length || undefined },
             { tab:"ohlc",      icon:<IconChartLine size={20} />,     label:"OHLC" },
             { tab:"results",   icon:<IconFileAnalytics size={20} />, label:"Results" },
           ] as const).map(({ tab, icon, label, badge }: any) => (
@@ -621,11 +746,39 @@ function OptionsPageInner() {
                 <div className="py-2.5 bg-[#fff0f3] border-l border-[#cbd5e1]" />
               </div>
             </div>
-            {/* ── Mobile column headers (mobile only) */}
-            <div className="md:hidden flex-shrink-0 grid grid-cols-[1fr_56px_1fr] border-b border-[#cbd5e1] bg-white text-[7px] font-bold tracking-[1.5px] uppercase" style={MONO}>
-              <div className="px-3 py-2 text-center text-[#0284c7] bg-[#e8f4ff]">CE</div>
-              <div className="py-2 text-center text-[#64748b] bg-[#e8eef5]">STRIKE</div>
-              <div className="px-3 py-2 text-center text-[#e11d48] bg-[#fff0f3]">PE</div>
+            {/* ── Mobile: stats strip + column headers */}
+            <div className="md:hidden flex-shrink-0 bg-white border-b border-[#cbd5e1]">
+              {/* Stats strip */}
+              <div className="flex items-center border-b border-[#f1f5f9] px-3 py-1.5 overflow-x-auto" style={{ scrollbarWidth: "none" }}>
+                <div className="flex items-center gap-1.5 flex-shrink-0 pr-3 border-r border-[#e2e8f0]">
+                  <span className="text-[7px] tracking-[1px] text-[#94a3b8] uppercase" style={MONO}>SPOT</span>
+                  <span className="text-[11px] font-bold text-[#1e293b]" style={MONO}>{data.spot.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 px-3 border-r border-[#e2e8f0]">
+                  <span className="text-[7px] tracking-[1px] text-[#94a3b8] uppercase" style={MONO}>ATM</span>
+                  <span className="text-[11px] font-bold text-[#0284c7]" style={MONO}>{atmStrike}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 px-3 border-r border-[#e2e8f0]">
+                  <span className="text-[7px] tracking-[1px] text-[#94a3b8] uppercase" style={MONO}>PCR</span>
+                  <span className={`text-[11px] font-bold ${pcrOI >= 1 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pcrOI.toFixed(2)}</span>
+                </div>
+                <div className="flex items-center gap-1.5 flex-shrink-0 px-3">
+                  <span className="text-[7px] tracking-[1px] text-[#94a3b8] uppercase" style={MONO}>PAIN</span>
+                  <span className="text-[11px] font-bold text-[#ea580c]" style={MONO}>{maxPain}</span>
+                </div>
+              </div>
+              {/* Column headers */}
+              <div className="grid grid-cols-[1fr_68px_1fr] text-[7px] font-bold tracking-[1.5px] uppercase" style={MONO}>
+                <div className="px-3 py-1.5 bg-[#e8f4ff] text-center">
+                  <div className="text-[#0284c7]">CE</div>
+                  <div className="text-[#94a3b8] text-[6px] mt-0.5 font-normal">LTP · OI</div>
+                </div>
+                <div className="py-1.5 text-center text-[#64748b] bg-[#e8eef5] flex items-center justify-center">STK</div>
+                <div className="px-3 py-1.5 bg-[#fff0f3] text-center">
+                  <div className="text-[#e11d48]">PE</div>
+                  <div className="text-[#94a3b8] text-[6px] mt-0.5 font-normal">LTP · OI</div>
+                </div>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto">
               {filteredRows.map(row => <ChainRow key={row.strike} row={row} atmStrike={atmStrike} onAddWatch={addToWatch} addedTokens={watchlistTokens} expiry={expiry} onOpenChart={(_token, strike, type, _sym) => { window.open(`https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, strike, type)}`, "_blank"); }} />)}
@@ -707,7 +860,8 @@ function OptionsPageInner() {
       </div>
 
       {/* ── Mobile bottom nav (hidden on md+) ── */}
-      <nav className="md:hidden flex items-center justify-around h-14 bg-white border-t border-[#e2e8f0] flex-shrink-0">
+      <nav className="md:hidden flex items-center justify-around h-14 flex-shrink-0"
+        style={{ background: isDark ? "#0f172a" : "#fff", borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
         <button onClick={() => setActiveTab("account")}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "account" ? "#ea580c" : "#94a3b8" }}>
@@ -733,7 +887,7 @@ function OptionsPageInner() {
         <button onClick={() => setActiveTab("watchlist")}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "watchlist" ? "#ea580c" : "#94a3b8" }}>
-          <IconStar size={22} />
+          {activeTab === "watchlist" ? <IconBookmarkFilled size={22} /> : <IconBookmark size={22} />}
           <span className="text-[8px]" style={MONO}>Watch</span>
           {watchlist.length > 0 && (
             <span className="absolute top-1.5 right-[calc(50%-18px)] min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
@@ -753,6 +907,183 @@ function OptionsPageInner() {
           <span className="text-[8px]" style={MONO}>Results</span>
         </button>
       </nav>
+
+      {/* ── Mobile drawer (left-to-right, 75% width) ── */}
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 md:hidden transition-opacity duration-300"
+        style={{ background: "rgba(0,0,0,0.45)", opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none" }}
+        onClick={() => setDrawerOpen(false)}
+      />
+      {/* Panel */}
+      <div
+        className="fixed inset-y-0 left-0 z-50 flex flex-col md:hidden shadow-2xl transition-transform duration-300 ease-out"
+        style={{
+          width: "75vw", maxWidth: "320px",
+          background: isDark ? "#0f172a" : "#fff",
+          borderRight: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`,
+          transform: drawerOpen ? "translateX(0)" : "translateX(-100%)",
+        }}>
+
+        {/* User details + close button — merged into one row */}
+        <div className="px-4 py-4 border-b flex-shrink-0"
+          style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+          <div className="flex items-start gap-3">
+            <ProfileAvatar size={44} />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-bold truncate" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                {kiteProfile?.user_name || liveUser || "Demo Mode"}
+              </div>
+              {kiteProfile?.user_id && (
+                <div className="text-[10px] mt-0.5" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>
+                  {kiteProfile.user_id}
+                </div>
+              )}
+              {kiteProfile?.email && (
+                <div className="text-[9px] mt-0.5 truncate" style={{ ...MONO, color: isDark ? "#475569" : "#94a3b8" }}>
+                  {kiteProfile.email}
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <span className="text-[7px] font-black px-1.5 py-0.5 rounded"
+                  style={{ background: "#387ed115", color: "#387ed1", ...MONO }}>
+                  {isDemoMode ? "DEMO" : (kiteProfile?.broker || "ZERODHA")}
+                </span>
+                <span className="text-[9px]" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>
+                  {isDemoMode ? "Paper Trading" : "Connected"}
+                </span>
+              </div>
+            </div>
+            {/* Close button — top right */}
+            <button onClick={() => setDrawerOpen(false)}
+              className="w-7 h-7 flex items-center justify-center rounded-lg cursor-pointer flex-shrink-0"
+              style={{ background: isDark ? "#1e293b" : "#f1f5f9", color: isDark ? "#94a3b8" : "#64748b" }}>
+              <IconX size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Expiry — only when on chain tab */}
+        {activeTab === "chain" && (
+          <div className="px-4 py-3 border-b flex-shrink-0"
+            style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+            <div className="text-[9px] font-bold tracking-[1.5px] uppercase mb-2"
+              style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>Option Expiry</div>
+            <Select value={expiry} onValueChange={v => { setExpiry(v); setDrawerOpen(false); }}>
+              <SelectTrigger className="w-full h-9 px-3 text-[11px] rounded-xl border"
+                style={{ ...MONO, background: isDark ? "#1e293b" : "#f8fafc", borderColor: isDark ? "#334155" : "#e2e8f0", color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {expiries.map(e => <SelectItem key={e} value={e} style={MONO}>{e}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        {/* Copy Token */}
+        {!isDemoMode && liveUser && (
+          <div className="px-4 py-3 border-b flex-shrink-0 flex items-center justify-between"
+            style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[11px] font-medium" style={{ color: isDark ? "#94a3b8" : "#475569" }}>
+                Copy Access Token
+              </span>
+              <span className="text-[9px]" style={{ ...MONO, color: isDark ? "#475569" : "#94a3b8" }}>
+                {tokenCopied ? "Copied to clipboard!" : "For manual use"}
+              </span>
+            </div>
+            <button onClick={handleCopyToken}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl cursor-pointer transition-all"
+              style={{
+                background: tokenCopied ? "#16a34a15" : (isDark ? "#1e293b" : "#f1f5f9"),
+                color: tokenCopied ? "#16a34a" : (isDark ? "#94a3b8" : "#64748b"),
+                border: `1px solid ${tokenCopied ? "#16a34a30" : (isDark ? "#334155" : "#e2e8f0")}`,
+              }}>
+              {tokenCopied ? <IconCopyCheck size={15} /> : <IconCopy size={15} />}
+              <span className="text-[10px] font-bold" style={MONO}>
+                {tokenCopied ? "Copied" : "Copy"}
+              </span>
+            </button>
+          </div>
+        )}
+
+        {/* Theme */}
+        <div className="px-4 py-3 border-b flex-shrink-0 flex items-center justify-between"
+          style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+          <span className="text-[11px] font-medium" style={{ color: isDark ? "#94a3b8" : "#475569" }}>Theme</span>
+          <ThemeToggle />
+        </div>
+
+        {/* Market Holidays 2026 — Accordion */}
+        <div className="flex-shrink-0 border-b" style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+          {/* Accordion header — tap to toggle */}
+          <button
+            onClick={() => setHolidaysOpen(v => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between cursor-pointer"
+            style={{ background: "transparent" }}>
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-bold tracking-[1.5px] uppercase" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>
+                NSE Holidays 2026
+              </span>
+              <span className="text-[8px] px-1.5 py-0.5 rounded-sm" style={{ ...MONO, background: "#ea580c15", color: "#ea580c" }}>
+                {MARKET_HOLIDAYS_2026.filter(h => h.date >= new Date().toISOString().split("T")[0]).length} upcoming
+              </span>
+            </div>
+            <span className="text-[10px] transition-transform duration-200 flex-shrink-0"
+              style={{ color: isDark ? "#64748b" : "#94a3b8", transform: holidaysOpen ? "rotate(180deg)" : "rotate(0deg)" }}>
+              ▼
+            </span>
+          </button>
+          {/* Accordion body */}
+          {holidaysOpen && (
+            <div className="overflow-y-auto px-3 pb-3" style={{ maxHeight: "220px", scrollbarWidth: "none" }}>
+              {MARKET_HOLIDAYS_2026.map(h => {
+                const today = new Date().toISOString().split("T")[0];
+                const isPast = h.date < today;
+                const day = holidayDayName(h.date);
+                const [, mm, dd] = h.date.split("-");
+                return (
+                  <div key={h.date} className="flex items-center gap-2 py-1.5 border-b last:border-0"
+                    style={{ borderColor: isDark ? "#1e293b" : "#f8fafc", opacity: isPast ? 0.35 : 1 }}>
+                    <div className="w-8 text-center flex-shrink-0">
+                      <div className="text-[11px] font-black leading-none" style={{ ...MONO, color: isPast ? "#94a3b8" : "#ea580c" }}>
+                        {dd}
+                      </div>
+                      <div className="text-[7px] leading-none mt-0.5" style={{ ...MONO, color: "#94a3b8" }}>
+                        {["","JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"][+mm]}
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[10px] font-medium truncate" style={{ color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                        {h.name}
+                      </div>
+                      <div className="text-[8px]" style={{ ...MONO, color: "#94a3b8" }}>{day}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Logout */}
+        {!isDemoMode && authenticated && (
+          <div className="px-4 py-4 border-t flex-shrink-0"
+            style={{ borderColor: isDark ? "#1e293b" : "#f1f5f9" }}>
+            <button
+              onClick={() => { setDrawerOpen(false); handleLogout(); }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-[11px] font-bold tracking-[0.5px] cursor-pointer"
+              style={{ ...MONO, color: "#e11d48", border: "1px solid #e11d4830", background: "#e11d4808" }}>
+              <IconPower size={14} />
+              Logout
+            </button>
+          </div>
+        )}
+
+      </div>
 
     </div>
   );
@@ -817,60 +1148,74 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
   return (
     <>
       {/* ── MOBILE CARD (hidden md+) ── */}
-      <div className={`md:hidden border-b border-[#f1f5f9] transition-colors ${rowBg}`}>
-        <div className="grid grid-cols-[1fr_56px_1fr]">
+      <div className={`md:hidden border-b transition-colors ${isATM ? "border-l-[3px] border-l-[#0284c7] border-b-[#dbeafe]" : "border-l-[3px] border-l-transparent border-b-[#f1f5f9]"}`}>
+        <div className="grid grid-cols-[1fr_68px_1fr]">
 
           {/* CE side */}
-          <div className="px-3 py-2.5 bg-[#f8fbff] flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <span className={`text-[12px] font-bold tabular-nums ${ce.ltp>=200&&ce.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
-                ₹{ce.ltp.toFixed(2)}
-              </span>
+          <div className={`px-2.5 py-2 flex flex-col gap-0.5 ${isATM ? "bg-[#eff6ff]" : "bg-[#f8fbff]"}`}>
+            {/* Star + LTP */}
+            <div className="flex items-center justify-between gap-1">
               <button onClick={() => onAddWatch(ce)}
-                className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0
-                  ${ceAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30"}`}>
-                {ceAdded ? <IconStarFilled size={10} /> : <IconStar size={10} />}
+                className={`w-5 h-5 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0
+                  ${ceAdded ? "bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]" : "bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30"}`}>
+                {ceAdded ? <IconBookmarkFilled size={9} /> : <IconBookmark size={9} />}
               </button>
+              <span className={`text-[14px] font-bold tabular-nums leading-none ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>
+                {ce.ltp.toFixed(2)}
+              </span>
             </div>
-            <div className={`text-[9px] ${ce.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
-              {ce.ltpChange>=0?"▲":"▼"}{Math.abs(ce.ltpChange).toFixed(2)}
+            {/* Strike name */}
+            <div className="text-[8px] font-bold text-right text-[#0284c7]/70 tracking-[0.5px]" style={MONO}>
+              {strike} CE
             </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[8px] text-[#94a3b8]" style={MONO}>{fmtOI(ce.oi)}</span>
+            {/* OI + chart */}
+            <div className="flex items-center justify-between mt-0.5">
               <button onClick={() => onOpenChart(ce.token, strike, "CE", tvSymbol(expiry, strike, "CE"))}
-                className="w-5 h-5 flex items-center justify-center rounded text-[#0284c7] opacity-50 cursor-pointer">
+                className="w-4 h-4 flex items-center justify-center text-[#0284c7] opacity-40 cursor-pointer flex-shrink-0">
                 <CandleIcon color="#0284c7" />
               </button>
+              <span className="text-[8px] text-[#64748b]" style={MONO}>{fmtOI(ce.oi)}</span>
+            </div>
+            {/* OI mini-bar */}
+            <div className="h-[2px] rounded-full overflow-hidden mt-0.5" style={{ background: "rgba(2,132,199,0.12)" }}>
+              <div className="h-full rounded-full" style={{ width: `${row.ceOIBar}%`, background: "rgba(2,132,199,0.5)" }} />
             </div>
           </div>
 
           {/* Strike center */}
-          <div className={`flex flex-col items-center justify-center border-x border-[#e2e8f0] py-2 ${isATM?"bg-[#dbeafe]":"bg-[#f8fafc]"}`}>
-            <div className={`text-[11px] font-bold tabular-nums leading-none ${isATM?"text-[#0284c7]":"text-[#1e293b]"}`} style={MONO}>{strike}</div>
+          <div className={`flex flex-col items-center justify-center border-x border-[#e2e8f0] py-2 ${isATM ? "bg-[#dbeafe]" : "bg-[#f8fafc]"}`}>
+            <div className={`text-[12px] font-bold tabular-nums leading-none ${isATM ? "text-[#0284c7]" : "text-[#1e293b]"}`} style={MONO}>{strike}</div>
             {isATM && <div className="text-[6px] text-[#0284c7]/60 tracking-[1px] mt-0.5 font-bold" style={MONO}>ATM</div>}
           </div>
 
           {/* PE side */}
-          <div className="px-3 py-2.5 bg-[#fff8fa] flex flex-col gap-1 items-end">
-            <div className="flex items-center justify-between w-full">
-              <button onClick={() => onAddWatch(pe)}
-                className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0
-                  ${peAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30"}`}>
-                {peAdded ? <IconStarFilled size={10} /> : <IconStar size={10} />}
-              </button>
-              <span className={`text-[12px] font-bold tabular-nums ${pe.ltp>=200&&pe.ltp<=300?"text-[#16a34a]":"text-[#1e293b]"}`} style={MONO}>
-                ₹{pe.ltp.toFixed(2)}
+          <div className={`px-2.5 py-2 flex flex-col gap-0.5 ${isATM ? "bg-[#fff0ef]" : "bg-[#fff8fa]"}`}>
+            {/* LTP + star */}
+            <div className="flex items-center justify-between gap-1">
+              <span className={`text-[14px] font-bold tabular-nums leading-none ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>
+                {pe.ltp.toFixed(2)}
               </span>
+              <button onClick={() => onAddWatch(pe)}
+                className={`w-5 h-5 rounded flex items-center justify-center border cursor-pointer transition-all flex-shrink-0
+                  ${peAdded ? "bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]" : "bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30"}`}>
+                {peAdded ? <IconBookmarkFilled size={9} /> : <IconBookmark size={9} />}
+              </button>
             </div>
-            <div className={`text-[9px] ${pe.ltpChange>=0?"text-[#16a34a]":"text-[#e11d48]"}`} style={MONO}>
-              {pe.ltpChange>=0?"▲":"▼"}{Math.abs(pe.ltpChange).toFixed(2)}
+            {/* Strike name */}
+            <div className="text-[8px] font-bold text-left text-[#e11d48]/70 tracking-[0.5px]" style={MONO}>
+              {strike} PE
             </div>
-            <div className="flex items-center justify-between w-full">
+            {/* OI + chart */}
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-[8px] text-[#64748b]" style={MONO}>{fmtOI(pe.oi)}</span>
               <button onClick={() => onOpenChart(pe.token, strike, "PE", tvSymbol(expiry, strike, "PE"))}
-                className="w-5 h-5 flex items-center justify-center rounded text-[#e11d48] opacity-50 cursor-pointer">
+                className="w-4 h-4 flex items-center justify-center text-[#e11d48] opacity-40 cursor-pointer flex-shrink-0">
                 <CandleIcon color="#e11d48" />
               </button>
-              <span className="text-[8px] text-[#94a3b8]" style={MONO}>{fmtOI(pe.oi)}</span>
+            </div>
+            {/* OI mini-bar */}
+            <div className="h-[2px] rounded-full overflow-hidden mt-0.5" style={{ background: "rgba(225,29,72,0.12)" }}>
+              <div className="h-full rounded-full" style={{ width: `${100 - row.ceOIBar}%`, background: "rgba(225,29,72,0.5)" }} />
             </div>
           </div>
 
@@ -886,7 +1231,7 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
           <button onClick={() => onAddWatch(ce)} title={ceAdded ? `Remove CE ${strike}` : `Add CE ${strike} to watchlist`}
             className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all
               ${ceAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#0284c7]/10 text-[#0284c7] border-[#0284c7]/30 hover:bg-[#0284c7]/20"}`}>
-            {ceAdded ? <IconStarFilled size={11} /> : <IconStar size={11} />}
+            {ceAdded ? <IconBookmarkFilled size={11} /> : <IconBookmark size={11} />}
           </button>
         </div>
 
@@ -955,7 +1300,7 @@ function ChainRow({ row, atmStrike, onAddWatch, addedTokens, expiry, onOpenChart
           <button onClick={() => onAddWatch(pe)} title={peAdded ? `Remove PE ${strike}` : `Add PE ${strike} to watchlist`}
             className={`w-6 h-6 rounded flex items-center justify-center border cursor-pointer transition-all
               ${peAdded?"bg-[#fbbf24]/15 border-[#fbbf24]/60 text-[#fbbf24]":"bg-[#e11d48]/10 text-[#e11d48] border-[#e11d48]/30 hover:bg-[#e11d48]/20"}`}>
-            {peAdded ? <IconStarFilled size={11} /> : <IconStar size={11} />}
+            {peAdded ? <IconBookmarkFilled size={11} /> : <IconBookmark size={11} />}
           </button>
         </div>
 

@@ -295,11 +295,25 @@ function OptionsPageInner() {
       const API = process.env.NEXT_PUBLIC_API_URL!;
       const res  = await fetch(`${API}/api/auth/token-value`);
       const data = await res.json();
-      if (data.access_token) {
+      if (!data.access_token) return;
+
+      // Modern clipboard API works only on HTTPS / localhost.
+      // Fall back to execCommand for mobile browsers on plain HTTP.
+      if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(data.access_token);
-        setTokenCopied(true);
-        setTimeout(() => setTokenCopied(false), 2000);
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = data.access_token;
+        ta.style.cssText = "position:fixed;left:-9999px;top:-9999px;opacity:0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
       }
+
+      setTokenCopied(true);
+      setTimeout(() => setTokenCopied(false), 2000);
     } catch {}
   }
 
@@ -567,7 +581,7 @@ function OptionsPageInner() {
           <ProfileAvatar size={32} />
           {(kiteProfile?.user_name || liveUser) && (
             <div className="flex flex-col items-start min-w-0">
-              <span className="text-[11px] font-bold truncate max-w-[110px] leading-tight"
+              <span className="text-[11px] font-bold truncate max-w-[150px] leading-tight"
                 style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
                 {kiteProfile?.user_name || liveUser}
               </span>
@@ -1037,7 +1051,7 @@ function OptionsPageInner() {
           </button>
           {/* Accordion body */}
           {holidaysOpen && (
-            <div className="overflow-y-auto px-3 pb-3" style={{ maxHeight: "220px", scrollbarWidth: "none" }}>
+            <div className="overflow-y-auto px-3 pb-3" style={{ maxHeight: "240px", scrollbarWidth: "none" }}>
               {MARKET_HOLIDAYS_2026.map(h => {
                 const today = new Date().toISOString().split("T")[0];
                 const isPast = h.date < today;

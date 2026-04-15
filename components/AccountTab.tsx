@@ -723,7 +723,8 @@ export function AccountTab() {
                     <div className="px-4 pb-3">
                       <div className="text-[28px] font-black leading-none"
                         style={{ ...MONO, color: data.pnl.total >= 0 ? "#16a34a" : "#e11d48" }}>
-                        {data.pnl.total >= 0 ? "+" : ""}₹{fmt(data.pnl.total)}
+                        {/* {data.pnl.total >= 0 ? "+" : ""}₹{fmt(data.pnl.total)} */}
+                         {net >= 0 ? "+" : ""}₹{fmt(net)}
                       </div>
                       <div className="text-[10px] mt-0.5" style={{ ...MONO, color: subtext }}>Gross P&amp;L (Today)</div>
                     </div>
@@ -938,7 +939,7 @@ export function AccountTab() {
                 <button
                   onClick={handleExitAll}
                   disabled={exitAllBusy}
-                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50"
+                  className="flex hidden items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50"
                   style={{ ...MONO, background: "#e11d48", color: "#fff" }}
                 >
                   {exitAllBusy
@@ -1011,7 +1012,7 @@ export function AccountTab() {
                     className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t" : ""}`}
                     style={{ borderColor: border }}>
                     {/* B/S pill */}
-                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0"
+                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0 w-9 flex justify-center items-center"
                       style={{
                         ...MONO,
                         background: isBuy ? "#16a34a18" : "#e11d4818",

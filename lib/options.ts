@@ -24,6 +24,7 @@ export function bs(S:number,K:number,T:number,r:number,sigma:number,type:"CE"|"P
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface OptionLeg {
   token:number; strike:number; type:"CE"|"PE";
+  tradingsymbol?:string;
   ltp:number; prevLtp:number; ltpChange:number;
   oi:number; oiChange:number; volume:number;
   iv:number; delta:number; gamma:number; theta:number; vega:number;

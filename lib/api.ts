@@ -102,6 +102,11 @@ export const accountApi = {
       entryTime: string | null; exitTime: string | null; durationSecs: number | null;
     }>;
   }>("/api/account/positions"),
+  placeOrder: (tradingsymbol: string, transaction_type: "BUY" | "SELL", quantity: number, exchange?: string) =>
+    req<{ order_id: string; tradingsymbol: string; transaction_type: string; quantity: number }>(
+      "/api/account/order",
+      { method: "POST", body: JSON.stringify({ tradingsymbol, transaction_type, quantity, exchange }) }
+    ),
   exitPosition: (tradingsymbol: string, quantity: number) =>
     req<{ order_id: string; tradingsymbol: string; quantity: number }>("/api/account/exit", {
       method: "POST",

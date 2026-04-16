@@ -492,10 +492,27 @@ export function AccountTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── 1-second live positions polling ────────────────────────────────────────
+  // ── 500ms wallet / charges / P&L polling ──────────────────────────────────
   useEffect(() => {
     let active  = true;
-    let running = false; // guard: skip tick if previous one is still in-flight
+    let running = false;
+    const poll = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const d = await accountApi.get();
+        if (active) setData(d);
+      } catch {}
+      finally { running = false; }
+    };
+    const id = setInterval(poll, 500);
+    return () => { active = false; clearInterval(id); };
+  }, []);
+
+  // ── 500ms live positions polling ───────────────────────────────────────────
+  useEffect(() => {
+    let active  = true;
+    let running = false;
 
     const poll = async () => {
       if (running) return;
@@ -507,12 +524,12 @@ export function AccountTab() {
       finally { running = false; }
     };
 
-    poll(); // immediate first fetch
+    poll();
     const id = setInterval(poll, 500);
     return () => { active = false; clearInterval(id); };
   }, []);
 
-  const displayPositions = livePositions ?? data?.positions ?? [];
+  const displayPositions = [...(livePositions ?? data?.positions ?? [])].reverse();
 
   // ── Exit a single position ─────────────────────────────────────────────────
   async function handleExit(tradingsymbol: string, quantity: number) {
@@ -905,22 +922,22 @@ export function AccountTab() {
             </CardModal>
           )}
 
-          {/* ── Win rate stats ── */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              { label: "Total Trades",  val: data.stats.totalTrades, color: muted,      suffix: "" },
-              { label: "Win Rate",      val: data.stats.winRate,      color: data.stats.winRate >= 50 ? "#16a34a" : "#e11d48", suffix: "%" },
-              { label: "Winners",       val: data.stats.winners,      color: "#16a34a",  suffix: "" },
-              { label: "Losers",        val: data.stats.losers,       color: "#e11d48",  suffix: "" },
-            ].map(({ label, val, color, suffix }) => (
-              <div key={label} className="rounded-xl border p-3 flex flex-col gap-1"
-                style={{ background: isDark ? "#0f172a" : "#fff", borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
-                <span className="text-[8px] font-bold tracking-[1.5px] uppercase" style={{ ...MONO, color: subtext }}>{label}</span>
-                <span className="text-[20px] font-black leading-tight" style={{ ...MONO, color }}>
-                  {val}{suffix}
-                </span>
-              </div>
-            ))}
+          {/* ── Win rate stats — single card ── */}
+          <div className="rounded-xl border mb-5 overflow-hidden"
+            style={{ background: isDark ? "#0f172a" : "#fff", borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
+            <div className="grid grid-cols-3 divide-x" style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
+              {[
+                { label: "Trades",   val: data.stats.totalTrades, color: muted      },
+                { label: "Winners",  val: data.stats.winners,     color: "#16a34a"  },
+                { label: "Losers",   val: data.stats.losers,      color: "#e11d48"  },
+              ].map(({ label, val, color }) => (
+                <div key={label} className="flex flex-col items-center py-3 gap-0.5"
+                  style={{ borderColor: isDark ? "#1e293b" : "#e2e8f0" }}>
+                  <span className="text-[7px] font-bold tracking-[1.5px] uppercase" style={{ ...MONO, color: subtext }}>{label}</span>
+                  <span className="text-[22px] font-black leading-tight" style={{ ...MONO, color }}>{val}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* ── Positions header ── */}
@@ -935,17 +952,17 @@ export function AccountTab() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {displayPositions.some(p => p.status === "OPEN") && (
+              {displayPositions.some(p => p.status !== "OPEN") && (
                 <button
                   onClick={handleExitAll}
                   disabled={exitAllBusy}
-                  className="flex hidden items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50"
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50"
                   style={{ ...MONO, background: "#e11d48", color: "#fff" }}
                 >
                   {exitAllBusy
                     ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
                     : <IconPower size={11} />}
-                  Exit All Positions
+                  Exit All
                 </button>
               )}
               <span className="text-[10px]" style={{ ...MONO, color: subtext }}>

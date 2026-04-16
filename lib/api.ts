@@ -38,9 +38,9 @@ export const authApi = {
 };
 
 export const optionsApi = {
-  expiries: () => req<{ expiries: string[] }>("/api/options/expiries"),
-  chain: (expiry: string, n = 15) =>
-    req<any>(`/api/options/chain/${expiry}?strikes=${n}`),
+  expiries: (index = "NIFTY") => req<{ expiries: string[] }>(`/api/options/expiries?index=${index}`),
+  chain: (expiry: string, n = 15, index = "NIFTY") =>
+    req<any>(`/api/options/chain/${expiry}?strikes=${n}&index=${index}`),
   candles: (token: number, date: string, interval = "minute") =>
     req<any>(
       `/api/options/candles?token=${token}&date=${date}&interval=${interval}`,

@@ -178,6 +178,8 @@ function OptionsPageInner() {
   const [ohlcBusy, setOhlcBusy] = useState(false);
 
   // ── Option chain mode toggles ───────────────────────────────────────────────
+  const [chainIndex, setChainIndex] = useState<"NIFTY" | "SENSEX">("NIFTY");
+  const chainLotSize = chainIndex === "SENSEX" ? 20 : LOT_SIZE;
   const [scalperOn, setScalerOn] = useState(true);
   const [strategyOn, setStrategyOn] = useState(false);
   type ChainOrder = {
@@ -249,7 +251,7 @@ function OptionsPageInner() {
   useEffect(() => {
     if (isDemoMode) return;
     optionsApi
-      .expiries()
+      .expiries(chainIndex)
       .then((d) => {
         if (d.expiries?.length) {
           setExpiries(d.expiries);
@@ -257,7 +259,7 @@ function OptionsPageInner() {
         }
       })
       .catch(() => {});
-  }, [authenticated]);
+  }, [authenticated, chainIndex]);
 
   // ── Check backend auth status on mount ─────────────────────────────────────
   useEffect(() => {
@@ -391,6 +393,7 @@ function OptionsPageInner() {
       const d = (await optionsApi.chain(
         expiry,
         strikeRange,
+        chainIndex,
       )) as OptionsChainData;
       setData(d);
       d.rows.forEach((r) => {
@@ -625,10 +628,10 @@ function OptionsPageInner() {
       setTimeout(() => setOrderState({ loading: false, result: null }), 3000);
       return;
     }
-    const qty = orderLots * LOT_SIZE;
+    const qty = orderLots * chainLotSize;
     setOrderState({ loading: true, result: null });
     try {
-      const resp = await accountApi.placeOrder(tradingsymbol, action, qty, "NFO");
+      const resp = await accountApi.placeOrder(tradingsymbol, action, qty, chainIndex === "SENSEX" ? "BFO" : "NFO");
       setOrderState({ loading: false, result: `✓ Order placed  #${resp.order_id}` });
       setTimeout(() => {
         setOrderState({ loading: false, result: null });
@@ -1269,6 +1272,18 @@ function OptionsPageInner() {
                     </div>
                   </div>
 
+                  {/* Index selector: NIFTY / SENSEX */}
+                  <div className="flex items-center rounded-full overflow-hidden border text-[8px] font-black flex-shrink-0"
+                    style={{ borderColor: "#cbd5e1", ...MONO }}>
+                    {(["NIFTY", "SENSEX"] as const).map(idx => (
+                      <button key={idx} onClick={() => { setChainIndex(idx); setExpiry(""); }}
+                        className="px-2 py-0.5 transition-colors"
+                        style={{ background: chainIndex === idx ? "#0284c7" : "transparent", color: chainIndex === idx ? "#fff" : "#64748b" }}>
+                        {idx}
+                      </button>
+                    ))}
+                  </div>
+
                   {/* PCR + ATM quick stats */}
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1">
@@ -1361,7 +1376,7 @@ function OptionsPageInner() {
                             border: "1px solid #0284c7",
                           }}
                         >
-                          NIFTY{" "}
+                          {chainIndex}{" "}
                           {data.spot.toLocaleString("en-IN", {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: 2,
@@ -1417,7 +1432,9 @@ function OptionsPageInner() {
                         }
                       }}
                       onOpenChart={(_token, strike, type, sym) => {
-                        const tv = sym || tvSymbol(expiry, strike, type as "CE"|"PE");
+                        const tv = sym || (chainIndex === "SENSEX"
+                          ? tvSymbolSensex(expiry, strike, type as "CE"|"PE")
+                          : tvSymbol(expiry, strike, type as "CE"|"PE"));
                         window.open(`https://www.tradingview.com/chart/?symbol=${tv}`, "_blank");
                       }}
                     />
@@ -1429,8 +1446,13 @@ function OptionsPageInner() {
               {!strategyOn &&
                 chainOrderPanel &&
                 (() => {
-                  console.log("[ChainOrder] tradingsymbol:", chainOrderPanel.leg.tradingsymbol);
-                  const approxBuy = chainOrderPanel.ltp * orderLots * LOT_SIZE;
+                  // Resolve live price from current chain data
+                  const liveRow = data?.rows.find(r => r.ce.token === chainOrderPanel.token || r.pe.token === chainOrderPanel.token);
+                  const liveLeg = liveRow
+                    ? (liveRow.ce.token === chainOrderPanel.token ? liveRow.ce : liveRow.pe)
+                    : null;
+                  const liveLtp = liveLeg?.ltp ?? chainOrderPanel.ltp;
+                  const approxBuy = liveLtp * orderLots * chainLotSize;
                   // BUY: need approx premium. SELL (writing): margin ~18–20× premium — show warning only.
                   const canBuy =
                     walletAvailable === null || walletAvailable >= approxBuy;
@@ -1461,7 +1483,7 @@ function OptionsPageInner() {
                               const sym = chainOrderPanel.leg.tradingsymbol || "";
                               // e.g. NIFTY26APR2624450CE → "NIFTY"
                               const m = sym.match(/^([A-Z]+)\d/);
-                              const underlying = m ? m[1] : "NIFTY";
+                              const underlying = m ? m[1] : chainIndex;
                               return `${underlying} ${chainOrderPanel.strike} ${chainOrderPanel.type}`;
                             })()}
                           </span>
@@ -1469,6 +1491,10 @@ function OptionsPageInner() {
                             style={{ background: chainOrderPanel.action === "BUY" ? "#16a34a20" : "#e11d4820",
                                      color: chainOrderPanel.action === "BUY" ? "#16a34a" : "#e11d48", ...MONO }}>
                             {chainOrderPanel.action}
+                          </span>
+                          {/* Live price */}
+                          <span className="text-[13px] font-black flex-shrink-0" style={{ ...MONO, color: textPrimary }}>
+                            ₹{liveLtp.toFixed(2)}
                           </span>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -1522,7 +1548,7 @@ function OptionsPageInner() {
                           className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold"
                           style={{ background: btnBg, color: btnColor }}>+</button>
                         <span className="text-[9px] ml-auto" style={{ ...MONO, color: textMuted }}>
-                          {orderLots} × {LOT_SIZE} = {orderLots * LOT_SIZE} qty
+                          {orderLots} × {chainLotSize} = {orderLots * chainLotSize} qty
                         </span>
                       </div>
 
@@ -1584,7 +1610,7 @@ function OptionsPageInner() {
                     (s, l) => s + (l.action === "SELL" ? l.ltp : 0),
                     0,
                   );
-                  const approxReq = netDebit * orderLots * LOT_SIZE;
+                  const approxReq = netDebit * orderLots * chainLotSize;
                   const canExecute =
                     walletAvailable === null || walletAvailable >= approxReq;
                   const firstLeg = basketLegs[0];
@@ -1595,7 +1621,7 @@ function OptionsPageInner() {
                         : firstLeg.strike - firstLeg.ltp
                       : null;
                   const maxLoss =
-                    netDebit > 0 ? -(netDebit * orderLots * LOT_SIZE) : null;
+                    netDebit > 0 ? -(netDebit * orderLots * chainLotSize) : null;
                   const fmtWallet =
                     walletAvailable !== null
                       ? `₹${walletAvailable.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
@@ -1659,7 +1685,7 @@ function OptionsPageInner() {
                           <span className="text-[7px] uppercase" style={{ ...MONO, color: textMuted }}>Max Profit</span>
                           <span className="text-[11px] font-black text-[#16a34a]" style={MONO}>
                             {netCredit > netDebit
-                              ? `₹${((netCredit - netDebit) * orderLots * LOT_SIZE).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
+                              ? `₹${((netCredit - netDebit) * orderLots * chainLotSize).toLocaleString("en-IN", { maximumFractionDigits: 0 })}`
                               : "Unlimited"}
                           </span>
                         </div>
@@ -2276,6 +2302,15 @@ function tvSymbol(expiry: string, strike: number, type: "CE" | "PE") {
   return `NSE:NIFTY${yy}${dd}${mon}${strike}${type}`;
 }
 
+function tvSymbolSensex(expiry: string, strike: number, type: "CE" | "PE") {
+  const exp = new Date(expiry);
+  const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const yy  = String(exp.getUTCFullYear()).slice(-2);
+  const dd  = String(exp.getUTCDate()).padStart(2, "0");
+  const mon = MONTHS[exp.getUTCMonth()];
+  return `BSE:SENSEX${yy}${dd}${mon}${strike}${type}`;
+}
+
 // Sensibull format: NIFTY + YY + M (no leading zero) + DD + STRIKE + TYPE
 // e.g. expiry=2026-03-24, strike=23100, type=PE → NIFTY2632423100PE
 function sensibullSym(expiry: string, strike: number, type: "CE" | "PE") {
@@ -2407,7 +2442,7 @@ function ChainRow({
                 </div>
                 <div className="flex items-center justify-between mt-0.5">
                   <span className="text-[8px]" style={{ ...MONO, color: "#94a3b8" }}>{fmtOI(ce.oi)}</span>
-                  <button onClick={() => window.open(`https://www.tradingview.com/chart/?symbol=${tvSymbol(expiry, strike, "CE")}`, "_blank")}
+                  <button onClick={() => onOpenChart(ce.token, strike, "CE", "")}
                     className="w-5 h-5 rounded flex items-center justify-center"
                     style={{ background: "#e8f4ff", color: "#0284c7" }}>
                     <IconChartLine size={10} />
@@ -2493,7 +2528,7 @@ function ChainRow({
                   </button>
                 </div>
                 <div className="flex items-center justify-between mt-0.5">
-                  <button onClick={() => window.open(`https://www.tradingview.com/chart/?symbol=${tvSymbol(expiry, strike, "PE")}`, "_blank")}
+                  <button onClick={() => onOpenChart(pe.token, strike, "PE", "")}
                     className="w-5 h-5 rounded flex items-center justify-center"
                     style={{ background: "#fff0f3", color: "#e11d48" }}>
                     <IconChartLine size={10} />

@@ -118,6 +118,8 @@ function OptionsPageInner() {
 
   const [expiries, setExpiries] = useState<string[]>(getNiftyExpiries());
   const [expiry, setExpiry] = useState("");
+  // SMC always uses NIFTY expiry regardless of chainIndex
+  const [niftyExpiry, setNiftyExpiry] = useState("");
   const [data, setData] = useState<OptionsChainData | null>(null);
   const [loading, setLoading] = useState(false);
   const [strikeRange] = useState<5 | 10 | 15>(15);
@@ -260,6 +262,15 @@ function OptionsPageInner() {
       })
       .catch(() => {});
   }, [authenticated, chainIndex]);
+
+  // ── Always keep a fresh NIFTY expiry for SMC (independent of chainIndex) ───
+  useEffect(() => {
+    if (isDemoMode) return;
+    optionsApi
+      .expiries("NIFTY")
+      .then((d) => { if (d.expiries?.length) setNiftyExpiry(d.expiries[0]); })
+      .catch(() => {});
+  }, [authenticated]);
 
   // ── Check backend auth status on mount ─────────────────────────────────────
   useEffect(() => {
@@ -479,9 +490,10 @@ function OptionsPageInner() {
   }
 
   async function fetchSMCAlerts() {
-    if (!expiry || isDemoMode || !authenticated) return;
+    const e = niftyExpiry || expiry;
+    if (!e || isDemoMode || !authenticated) return;
     try {
-      const r = (await smcApi.alerts(expiry)) as any;
+      const r = (await smcApi.alerts(e)) as any;
       const alerts = r.alerts ?? [];
       setSmcAlerts(alerts);
       setSmcWinRate(r.winRate ?? null);
@@ -489,11 +501,12 @@ function OptionsPageInner() {
   }
 
   async function triggerSMCScan() {
-    if (!expiry || isDemoMode || !authenticated) return;
+    const e = niftyExpiry || expiry;
+    if (!e || isDemoMode || !authenticated) return;
     setSmcBusy(true);
     try {
-      await smcApi.scan(expiry);
-      setTimeout(fetchSMCAlerts, 2000); // refresh after 2s
+      await smcApi.scan(e);
+      setTimeout(fetchSMCAlerts, 2000);
     } catch {
     } finally {
       setSmcBusy(false);
@@ -518,12 +531,13 @@ function OptionsPageInner() {
   }, [histDate, authenticated]);
 
   async function runHistoricalSMC() {
-    if (!expiry || isDemoMode || !authenticated) return;
+    const e = niftyExpiry || expiry;
+    if (!e || isDemoMode || !authenticated) return;
     setHistBusy(true);
     setHistErr("");
     setHistResults(null);
     try {
-      const r = (await smcApi.historical(histDate, expiry)) as any;
+      const r = (await smcApi.historical(histDate, e)) as any;
       const results = r.results ?? [];
       setHistResults(results);
       // also update winRate display from historical result
@@ -543,7 +557,7 @@ function OptionsPageInner() {
     const t = setInterval(fetchSMCAlerts, 500);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, expiry, authenticated]);
+  }, [activeTab, niftyExpiry, expiry, authenticated]);
 
   // Fetch SMC status every 30s
   useEffect(() => {
@@ -563,7 +577,7 @@ function OptionsPageInner() {
     if (isDemoMode || !authenticated || activeTab !== "smc") return;
     const t = setInterval(fetchSMCAlerts, 1000);
     return () => clearInterval(t);
-  }, [authenticated, activeTab, expiry]);
+  }, [authenticated, activeTab, niftyExpiry, expiry]);
 
   // Poll auto-trade status every 10s when on SMC tab
   useEffect(() => {
@@ -1748,7 +1762,7 @@ function OptionsPageInner() {
               smcStatus={smcStatus}
               busy={smcBusy}
               authenticated={authenticated}
-              expiry={expiry}
+              expiry={niftyExpiry || expiry}
               onTrigger={triggerSMCScan}
               onClear={async () => {
                 await smcApi.clear();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { accountApi } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { IconRefresh, IconWallet, IconReceipt, IconChartBar, IconList, IconDownload, IconClock,
@@ -148,32 +148,54 @@ function fmtDuration(secs: number | null): string {
   return `${s}s`;
 }
 
-// ─── Parse Kite symbol → human-readable ──────────────────────────────────────
+// ─── Parse Kite symbol → Zerodha-style human-readable ────────────────────────
+// Output: "NIFTY 17 Apr ₹23800 Call" / "SENSEX 18 Apr ₹83000 Put"
 function formatSymbol(sym: string): string {
   const type = sym.slice(-2); // CE or PE
   if (type !== "CE" && type !== "PE") return sym;
-  const base = sym.slice(0, -2);
-  const monthMap: Record<string, string> = {
-    "1":"JAN","2":"FEB","3":"MAR","4":"APR","5":"MAY","6":"JUN",
-    "7":"JUL","8":"AUG","9":"SEP","A":"OCT","B":"NOV","C":"DEC",
+  const label = type === "CE" ? "Call" : "Put";
+  const base  = sym.slice(0, -2);
+  const MON_CODE: Record<string, string> = {
+    "1":"Jan","2":"Feb","3":"Mar","4":"Apr","5":"May","6":"Jun",
+    "7":"Jul","8":"Aug","9":"Sep","A":"Oct","B":"Nov","C":"Dec",
   };
-  // Weekly: NIFTY2641323850 → index=NIFTY yy=26 month=4 dd=13 strike=23850
+  const MON_STR: Record<string, string> = {
+    JAN:"Jan",FEB:"Feb",MAR:"Mar",APR:"Apr",MAY:"May",JUN:"Jun",
+    JUL:"Jul",AUG:"Aug",SEP:"Sep",OCT:"Oct",NOV:"Nov",DEC:"Dec",
+  };
+  // Weekly: NIFTY2641723800CE → NIFTY 17 Apr ₹23800 Call
   const weekly = base.match(/^([A-Z]+)(\d{2})([1-9ABC])(\d{2})(\d+)$/);
   if (weekly) {
     const [, index, , m, dd, strike] = weekly;
-    const mon = monthMap[m] ?? m;
-    return `${index} ${parseInt(dd)} ${mon} ${strike} ${type}`;
+    const mon = MON_CODE[m] ?? m;
+    return `${index} ${parseInt(dd)} ${mon} ₹${strike} ${label}`;
   }
-  // Monthly: NIFTY26APR23850 → index=NIFTY yy=26 mon=APR strike=23850
+  // Monthly: NIFTY26APR23800CE → NIFTY Apr ₹23800 Call
   const monthly = base.match(/^([A-Z]+)(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+)$/);
   if (monthly) {
-    const [, index, yy, mon, strike] = monthly;
-    return `${index} ${mon} 20${yy} ${strike} ${type}`;
+    const [, index, , mon, strike] = monthly;
+    return `${index} ${MON_STR[mon] ?? mon} ₹${strike} ${label}`;
   }
   return sym;
 }
 
-// ─── Position card ────────────────────────────────────────────────────────────
+// ─── Index logo (NIFTY 50 / SENSEX) ─────────────────────────────────────────
+function IndexLogo({ symbol, optType }: { symbol: string; optType: "CE" | "PE" }) {
+  const isSensex  = symbol.startsWith("SENSEX");
+  const typeColor = optType === "CE" ? "#16a34a" : "#e11d48";
+  const src       = isSensex ? "/sensex-logo.avif" : "/nifty-logo.png";
+
+  return (
+    <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center"
+      style={{ border: `2px solid ${typeColor}`, background: "#111" }}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={isSensex ? "SENSEX" : "NIFTY 50"}
+        className="w-full h-full object-cover" />
+    </div>
+  );
+}
+
+// ─── Position card — exact Zerodha/Kite style ────────────────────────────────
 function PositionCard({ p, onExit, isExiting }: {
   p: Position;
   onExit?: () => void;
@@ -181,128 +203,280 @@ function PositionCard({ p, onExit, isExiting }: {
 }) {
   const { theme } = useTheme();
   const isDark  = theme === "dark";
-  const border  = isDark ? "#1e293b" : "#e2e8f0";
-  const subtext = isDark ? "#64748b" : "#94a3b8";
-  const muted   = isDark ? "#94a3b8" : "#64748b";
-  const text    = isDark ? "#e2e8f0" : "#1e293b";
+  const border  = isDark ? "#1e293b" : "#e8edf2";
+  const subtext = isDark ? "#94a3b8" : "#8a9bb0";
+  const text    = isDark ? "#e2e8f0" : "#1a2332";
+  const cardBg  = isDark ? "#0f172a" : "#ffffff";
+  const gridBg  = isDark ? "#0b1322" : "#f5f7fa";
 
   const isOpen   = p.status === "OPEN";
-  const isCE     = p.direction === "CE";
+  const optType  = (p.direction === "CE" ? "CE" : "PE") as "CE" | "PE";
   const pnlVal   = p.pnl;
-  const pnlColor = pnlVal > 0 ? "#16a34a" : pnlVal < 0 ? "#e11d48" : muted;
+  const pnlColor = pnlVal > 0 ? "#16a34a" : pnlVal < 0 ? "#e11d48" : subtext;
 
-  // Status label
-  const statusLabel = p.atStatus ?? p.status;
-  const statusColor = isOpen ? "#ea580c" : (pnlVal >= 0 ? "#16a34a" : "#e11d48");
-  const statusBg    = isOpen ? "#ea580c18" : (pnlVal >= 0 ? "#16a34a18" : "#e11d4818");
+  const pricePct = p.buyPrice > 0 ? ((p.currentPrice - p.buyPrice) / p.buyPrice * 100) : 0;
+  const pctUp    = pricePct >= 0;
+
+  // Days to expiry
+  function daysLeft(): number | null {
+    try {
+      const sym  = p.tradingsymbol;
+      const type = sym.slice(-2);
+      const base = sym.slice(0, -2);
+      const MON: Record<string,number> = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+      // monthly
+      const mo = base.match(/^[A-Z]+(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+)$/);
+      if (mo) {
+        const yr   = 2000 + parseInt(mo[1]);
+        const mnth = MON[mo[2]];
+        // last Thursday/Friday of month ~ day 28
+        const exp  = new Date(yr, mnth, 28);
+        return Math.max(0, Math.ceil((exp.getTime() - Date.now()) / 86400000));
+      }
+      // weekly
+      const wk = base.match(/^[A-Z]+\d{2}[1-9ABC](\d{2})(\d+)$/);
+      if (wk) {
+        // approximate from symbol chars — just show duration instead
+        return null;
+      }
+    } catch {}
+    return null;
+  }
+
+  // SL/TP state
+  const [showDetail, setShowDetail] = useState(false);
+  const [showSLTP,   setShowSLTP]   = useState(false);
+  const [slInput,    setSlInput]    = useState("");
+  const [tpInput,    setTpInput]    = useState("");
+  const [slSet,      setSlSet]      = useState<number | null>(null);
+  const [tpSet,      setTpSet]      = useState<number | null>(null);
+
+  function confirmSLTP() {
+    const sl = parseFloat(slInput);
+    const tp = parseFloat(tpInput);
+    if (!isNaN(sl) && sl > 0) setSlSet(sl);
+    if (!isNaN(tp) && tp > 0) setTpSet(tp);
+    setShowSLTP(false);
+  }
+
+  const displayName  = formatSymbol(p.tradingsymbol);
+  const days         = daysLeft();
+  const triggeredRef = useRef(false);
+  const onExitRef    = useRef(onExit);
+  useEffect(() => { onExitRef.current = onExit; }, [onExit]);
+
+  // ── Auto-exit when price hits SL or TP ──────────────────────────────────────
+  useEffect(() => {
+    if (!isOpen || triggeredRef.current) return;
+    const cmp = p.currentPrice;
+    if (cmp <= 0) return;
+
+    const hitSL = slSet !== null && cmp <= slSet;
+    const hitTP = tpSet !== null && cmp >= tpSet;
+
+    if ((hitSL || hitTP) && onExitRef.current) {
+      triggeredRef.current = true;
+      onExitRef.current();
+    }
+  // onExit intentionally excluded — use ref to avoid re-running on every render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.currentPrice, slSet, tpSet, isOpen]);
+
+  // Reset trigger flag when SL/TP values are changed
+  useEffect(() => { triggeredRef.current = false; }, [slSet, tpSet]);
+
+  // 2 × 3 detail grid rows
+  const gridRows = [
+    [
+      { label: "CMP",         value: p.currentPrice > 0 ? `₹${fmt(p.currentPrice)}` : "—" },
+      { label: "Entry Price", value: p.buyPrice > 0     ? `₹${fmt(p.buyPrice)}`     : "—" },
+      { label: "Exit Price",  value: p.sellPrice > 0    ? `₹${fmt(p.sellPrice)}`    : "—" },
+    ],
+    [
+      { label: "Entry Time", value: p.entryTime ?? "—"           },
+      { label: "Exit Time",  value: p.exitTime  ?? "—"           },
+      { label: "Duration",   value: fmtDuration(p.durationSecs)  },
+    ],
+  ];
 
   return (
-    <div className="rounded-xl border overflow-hidden flex flex-col"
-      style={{
-        borderColor: border,
-        background: isDark ? "#0f172a" : "#fff",
-        borderLeft: `3px solid ${isCE ? "#16a34a" : "#e11d48"}`,
-      }}>
+    <div className="rounded-2xl overflow-hidden flex flex-col"
+      style={{ background: cardBg, border: `1px solid ${border}`,
+               boxShadow: isDark ? "none" : "0 2px 10px rgba(0,0,0,0.06)" }}>
 
-      {/* ── Header: symbol + qty + P&L ── */}
-      <div className="flex items-stretch">
-
-        {/* Symbol + status + qty */}
-        <div className="flex-1 px-3 py-2.5 flex flex-col justify-center gap-1 min-w-0">
-          <div className="flex items-center gap-1.5 min-w-0">
-            <span className="text-[11px] font-bold truncate leading-tight" style={{ ...MONO, color: text }}>
-              {formatSymbol(p.tradingsymbol)}
+      {/* ── Header ── */}
+      <div className="flex items-start gap-3 px-4 pt-4 pb-3">
+        <IndexLogo symbol={p.tradingsymbol} optType={optType} />
+        <div className="flex-1 min-w-0">
+          {/* Name row */}
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-[14px] font-bold leading-snug flex-1 min-w-0" style={{ color: text }}>
+              {displayName}
+            </span>
+            {/* QTY — top right */}
+            <span className="flex items-center gap-1 text-[11px] font-semibold flex-shrink-0 mt-0.5"
+              style={{ color: isDark ? "#64748b" : "#6b7a90" }}>
+              <span style={{ fontSize: 13 }}>🧳</span>
+              {p.quantity} QTY
             </span>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold"
-              style={{ background: statusBg, color: statusColor, ...MONO }}>
-              {statusLabel}
+          {/* Price + % */}
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[12px]" style={{ color: subtext }}>Price:</span>
+            <span className="text-[13px] font-bold" style={{ color: text }}>
+              ₹{fmt(p.currentPrice || p.buyPrice)}
             </span>
-            {/* Qty highlight */}
-            <span className="px-2 py-0.5 rounded text-[9px] font-bold"
-              style={{ background: isDark ? "#1e293b" : "#f1f5f9", color: muted, ...MONO }}>
-              QTY&nbsp;{p.quantity}
-            </span>
+            {p.buyPrice > 0 && (
+              <span className="text-[12px] font-bold flex items-center gap-0.5"
+                style={{ color: pctUp ? "#16a34a" : "#e11d48" }}>
+                {pctUp ? "▲" : "▼"} {Math.abs(pricePct).toFixed(2)}%
+              </span>
+            )}
           </div>
         </div>
+      </div>
 
-        {/* P&L */}
-        <div className="flex flex-col items-end justify-center px-3 py-2.5 flex-shrink-0">
-          <span className="text-[17px] font-bold leading-tight" style={{ ...MONO, color: pnlColor }}>
+      {/* ── Divider ── */}
+      <div style={{ height: 1, background: border, marginBottom: 2 }} />
+
+      {/* ── Stats row: Avg Price | Days to expiry | Gain/Loss ── */}
+      <div className="grid grid-cols-3 px-4 py-3 gap-2">
+        <div>
+          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Avg. Price</div>
+          <div className="text-[15px] font-bold" style={{ color: text }}>₹{fmt(p.buyPrice)}</div>
+        </div>
+        <div>
+          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Days to expiry</div>
+          <div className="text-[15px] font-bold" style={{ color: text }}>
+            {days !== null ? days : (p.durationSecs !== null ? fmtDuration(p.durationSecs) : "—")}
+          </div>
+        </div>
+        <div>
+          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Gain/Loss</div>
+          <div className="text-[15px] font-bold" style={{ color: pnlColor }}>
             {pnlVal >= 0 ? "+" : ""}₹{fmt(pnlVal)}
-          </span>
-          <span className="text-[9px]" style={{ ...MONO, color: subtext }}>P&amp;L</span>
-        </div>
-
-        {/* Exit button — only for OPEN positions */}
-        {isOpen && onExit && (
-          <div className="flex items-center px-2 border-l" style={{ borderColor: border }}>
-            <button
-              onClick={onExit}
-              disabled={isExiting}
-              title="Exit position at market"
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[9px] font-black tracking-[1px] uppercase disabled:opacity-50 transition-opacity"
-              style={{ ...MONO, background: "#e11d48", color: "#fff" }}
-            >
-              {isExiting
-                ? <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block" />
-                : <IconX size={11} />}
-              {isExiting ? "" : "EXIT"}
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ── Times ── */}
-      <div className="grid grid-cols-2 border-t" style={{ borderColor: border }}>
-        <div className="px-3 py-2 border-r" style={{ borderColor: border }}>
-          <div className="text-[8px] uppercase tracking-[1px] mb-0.5" style={{ ...MONO, color: subtext }}>
-            Entry Time
-          </div>
-          <div className="text-[10px] font-bold uppercase" style={{ ...MONO, color: p.entryTime ? muted : subtext }}>
-            {p.entryTime ?? "—"}
-          </div>
-        </div>
-        <div className="px-3 py-2">
-          <div className="text-[8px] uppercase tracking-[1px] mb-0.5" style={{ ...MONO, color: subtext }}>
-            Exit Time
-          </div>
-          <div className="text-[10px] font-bold uppercase"
-            style={{ ...MONO, color: p.exitTime ? muted : (isOpen ? "#ea580c" : subtext) }}>
-            {p.exitTime ?? (isOpen ? "Open" : "—")}
           </div>
         </div>
       </div>
 
-      {/* ── Duration ── */}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-t" style={{ borderColor: border }}>
-        <IconClock className="size-4" style={{ color: isOpen ? "#ea580c" : subtext, flexShrink: 0 }} />
-        <span className="text-[8px] uppercase tracking-[1px]" style={{ ...MONO, color: subtext }}>
-          Duration
-        </span>
-        <span className="ml-auto text-[10px] font-bold"
-          style={{ ...MONO, color: isOpen ? "#ea580c" : muted }}>
-          {fmtDuration(p.durationSecs)}{isOpen ? " ↑" : ""}
-        </span>
-      </div>
+      {/* ── More details chevron toggle ── */}
+      <button
+        onClick={() => setShowDetail(v => !v)}
+        className="flex items-center justify-center gap-1 py-1.5 w-full text-[10px] font-semibold border-t transition-colors"
+        style={{ borderColor: border, color: subtext,
+                 background: isDark ? "#0a1220" : "#f8fafc" }}>
+        {showDetail ? "Less details" : "More details"}
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+          style={{ transition: "transform 0.2s", transform: showDetail ? "rotate(180deg)" : "rotate(0deg)" }}>
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
 
-      {/* ── Prices ── */}
-      <div className="grid grid-cols-3 border-t" style={{ borderColor: border }}>
-        {[
-          { label: "Entry Price", val: p.buyPrice  > 0 ? `₹${fmt(p.buyPrice)}`  : "—", color: muted },
-          { label: "Exit Price",  val: p.sellPrice > 0 ? `₹${fmt(p.sellPrice)}` : "—", color: muted },
-          { label: "CMP",         val: p.currentPrice > 0 ? `₹${fmt(p.currentPrice)}` : "—", color: text },
-        ].map(({ label, val, color }, i) => (
-          <div key={label} className={`px-3 py-2.5 ${i < 2 ? "border-r" : ""}`}
-            style={{ borderColor: border }}>
-            <div className="text-[8px] uppercase tracking-[1px] mb-0.5" style={{ ...MONO, color: subtext }}>
-              {label}
+      {/* ── 2 × 3 detail grid (collapsible) ── */}
+      {showDetail && (
+        <div className="mx-3 mb-3 mt-1 rounded-xl overflow-hidden border" style={{ borderColor: border }}>
+          {gridRows.map((row, ri) => (
+            <div key={ri}
+              className={`grid grid-cols-3 ${ri < gridRows.length - 1 ? "border-b" : ""}`}
+              style={{ borderColor: border, background: ri % 2 === 0 ? gridBg : cardBg }}>
+              {row.map((cell, ci) => (
+                <div key={cell.label}
+                  className={`flex flex-col px-3 py-2 ${ci < row.length - 1 ? "border-r" : ""}`}
+                  style={{ borderColor: border }}>
+                  <span className="text-[8px] font-bold uppercase tracking-[0.7px] mb-0.5"
+                    style={{ ...MONO, color: subtext }}>{cell.label}</span>
+                  <span className="text-[11px] font-bold leading-tight"
+                    style={{ ...MONO, color: text }}>{cell.value}</span>
+                </div>
+              ))}
             </div>
-            <div className="text-[10px] font-bold" style={{ ...MONO, color }}>{val}</div>
+          ))}
+        </div>
+      )}
+
+      {/* ── SL/TP chips ── */}
+      {(slSet !== null || tpSet !== null) && (
+        <div className="flex items-center gap-2 px-3 pb-3 flex-wrap">
+          {/* monitoring badge */}
+          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold"
+            style={{ background: "#f59e0b18", color: "#f59e0b" }}>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: "#f59e0b" }} />
+            MONITORING
+          </span>
+          {slSet !== null && (
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
+              style={{ background: "#e11d4815", color: "#e11d48" }}>
+              SL ₹{fmt(slSet)}
+              <button onClick={() => { setSlSet(null); triggeredRef.current = false; }}
+                className="ml-0.5 opacity-60 hover:opacity-100">×</button>
+            </span>
+          )}
+          {tpSet !== null && (
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
+              style={{ background: "#16a34a15", color: "#16a34a" }}>
+              TP ₹{fmt(tpSet)}
+              <button onClick={() => { setTpSet(null); triggeredRef.current = false; }}
+                className="ml-0.5 opacity-60 hover:opacity-100">×</button>
+            </span>
+          )}
+          <button onClick={() => setShowSLTP(true)} className="ml-auto text-[9px] font-bold underline"
+            style={{ color: subtext }}>edit</button>
+        </div>
+      )}
+
+      {/* ── SL/TP input panel ── */}
+      {showSLTP && (
+        <div className="mx-3 mb-3 rounded-xl p-3 flex flex-col gap-2"
+          style={{ background: isDark ? "#1e293b" : "#f8fafc", border: `1px solid ${border}` }}>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <div className="text-[8px] font-bold mb-1" style={{ color: subtext }}>Stop Loss ₹</div>
+              <input type="number" value={slInput} onChange={e => setSlInput(e.target.value)}
+                placeholder={p.buyPrice > 0 ? fmt(p.buyPrice * 0.88) : "0.00"}
+                className="w-full rounded-lg px-2 py-1.5 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#0f172a" : "#fff", color: text,
+                         border: `1px solid ${border}`, ...MONO }} />
+            </div>
+            <div className="flex-1">
+              <div className="text-[8px] font-bold mb-1" style={{ color: subtext }}>Target ₹</div>
+              <input type="number" value={tpInput} onChange={e => setTpInput(e.target.value)}
+                placeholder={p.buyPrice > 0 ? fmt(p.buyPrice * 1.24) : "0.00"}
+                className="w-full rounded-lg px-2 py-1.5 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#0f172a" : "#fff", color: text,
+                         border: `1px solid ${border}`, ...MONO }} />
+            </div>
           </div>
-        ))}
-      </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowSLTP(false)}
+              className="flex-1 py-1.5 rounded-lg text-[10px] font-bold"
+              style={{ background: isDark ? "#0f172a" : "#e2e8f0", color: subtext }}>Cancel</button>
+            <button onClick={confirmSLTP}
+              className="flex-1 py-1.5 rounded-lg text-[10px] font-bold text-white"
+              style={{ background: "#16a34a" }}>Set</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Action buttons ── */}
+      {isOpen && (
+        <div className="grid grid-cols-2 border-t" style={{ borderColor: border }}>
+          <button onClick={onExit} disabled={isExiting}
+            className="flex items-center justify-center gap-2 py-3.5 text-[13px] font-semibold border-r disabled:opacity-50"
+            style={{ color: "#1d6ff5", borderColor: border,
+                     background: isDark ? "#0a1628" : "#ebf3ff" }}>
+            {isExiting
+              ? <span className="w-3.5 h-3.5 border-2 border-[#1d6ff5]/30 border-t-[#1d6ff5] rounded-full animate-spin" />
+              : <IconArrowDownLeft size={15} />}
+            {isExiting ? "Exiting…" : "Instant Exit"}
+          </button>
+          <button onClick={() => setShowSLTP(v => !v)}
+            className="flex items-center justify-center gap-2 py-3.5 text-[13px] font-semibold"
+            style={{ color: "#16a34a", background: isDark ? "#071a0e" : "#ecfdf5" }}>
+            <IconPercentage size={15} />
+            {slSet || tpSet ? "Edit SL/Target" : "Add SL/Target"}
+          </button>
+        </div>
+      )}
 
     </div>
   );

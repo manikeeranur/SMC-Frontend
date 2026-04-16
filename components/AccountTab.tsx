@@ -952,7 +952,7 @@ export function AccountTab() {
               </span>
             </div>
             <div className="flex items-center gap-2">
-              {displayPositions.some(p => p.status !== "OPEN") && (
+              {displayPositions.some(p => p.status === "OPEN") && (
                 <button
                   onClick={handleExitAll}
                   disabled={exitAllBusy}

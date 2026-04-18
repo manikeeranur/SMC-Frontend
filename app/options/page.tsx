@@ -734,6 +734,38 @@ function OptionsPageInner() {
     }
   }
 
+  // ── Refresh live quotes for equity watchlist items ────────────────────────
+  useEffect(() => {
+    if (isDemoMode || !authenticated) return;
+    const equityItems = wlistGroups.flatMap(g => g.items).filter(
+      w => !w.expiry || w.leg.strike === 0 || !/\d/.test(w.leg.tradingsymbol ?? "")
+    );
+    if (!equityItems.length) return;
+
+    async function fetchEquityQuotes() {
+      const instruments = equityItems.map(w => `${w.exchange || "NSE"}:${w.leg.tradingsymbol}`);
+      try {
+        const { quotes } = await optionsApi.quotes(instruments);
+        setWlistGroups(prev => prev.map(g => ({
+          ...g,
+          items: g.items.map(w => {
+            const key = `${w.exchange || "NSE"}:${w.leg.tradingsymbol}`;
+            const q = quotes[key];
+            if (!q) return w;
+            return { ...w, leg: { ...w.leg, ltp: q.ltp, prevLtp: q.prevClose, ltpChange: q.ltpChange } };
+          }),
+        })));
+      } catch {}
+    }
+
+    fetchEquityQuotes();
+    const timer = setInterval(fetchEquityQuotes, 5000);
+    return () => clearInterval(timer);
+  }, [
+    wlistGroups.flatMap(g => g.items).filter(w => !w.expiry || w.leg.strike === 0).map(w => w.leg.token).join(","),
+    authenticated, isDemoMode,
+  ]);
+
   // Refresh 3m candles for all watchlist items every 3 minutes
   useEffect(() => {
     const ids = watchlist.map((w) => w.leg.token);
@@ -2055,7 +2087,7 @@ function OptionsPageInner() {
                         const syntheticLeg: OptionLeg = {
                           token: result.token, strike: 0, type: "CE",
                           tradingsymbol: result.tradingsymbol,
-                          ltp: result.ltp, prevLtp: result.ltp, ltpChange: 0,
+                          ltp: result.ltp, prevLtp: result.prevClose || result.ltp, ltpChange: result.ltpChange ?? 0,
                           oi: 0, oiChange: 0, volume: 0, iv: 0,
                           delta: 0, gamma: 0, theta: 0, vega: 0,
                           bid: 0, ask: 0, oiVolRatio: 0, moveScore: 0,
@@ -5912,7 +5944,7 @@ function WatchlistRow({
               ₹{ltp.toFixed(2)}
             </span>
             <span className="text-[10px] font-bold" style={{ ...MONO, color: pctClr }}>
-              {pctUp ? "▲" : "▼"}{Math.abs(pct).toFixed(2)}%
+              {pctUp ? "▲" : "▼"}{change >= 0 ? "+" : ""}{change.toFixed(2)} ({Math.abs(pct).toFixed(2)}%)
             </span>
           </div>
         </div>

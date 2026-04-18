@@ -16,6 +16,8 @@ export interface SearchResult {
   exchange: string;
   type: "EQ" | "CE" | "PE";
   ltp: number;
+  ltpChange?: number;
+  prevClose?: number;
   strike?: number;
   oi?: number;
   iv?: number;

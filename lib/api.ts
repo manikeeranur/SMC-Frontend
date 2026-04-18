@@ -66,6 +66,10 @@ export const optionsApi = {
     }>(`/api/options/historical-open-prices?date=${date}&expiry=${expiry}`),
   historicalScan: (date: string, expiry: string) =>
     req<any>(`/api/options/historical-scan?date=${date}&expiry=${expiry}`),
+  quotes: (instruments: string[]) =>
+    req<{ quotes: Record<string, { ltp: number; prevClose: number; ltpChange: number }> }>(
+      `/api/options/quotes?instruments=${instruments.map(encodeURIComponent).join(",")}`
+    ),
 };
 
 export const searchApi = {

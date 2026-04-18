@@ -5,6 +5,7 @@ import {
   createChart,
   CandlestickSeries,
   LineSeries,
+  AreaSeries,
   HistogramSeries,
 } from "lightweight-charts";
 import { IconX, IconChevronLeft } from "@tabler/icons-react";
@@ -22,7 +23,20 @@ import { useTheme } from "@/lib/theme";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type TfLabel = "1m" | "3m" | "5m" | "10m" | "15m" | "1h" | "4h" | "1D";
-type ChartType = "candle" | "line";
+type ChartType = "candle" | "ha" | "line" | "area";
+
+function toHeikinAshi(candles: Candle[]): Candle[] {
+  const out: Candle[] = [];
+  for (let i = 0; i < candles.length; i++) {
+    const c  = candles[i];
+    const hc = (c.open + c.high + c.low + c.close) / 4;
+    const ho = i === 0 ? (c.open + c.close) / 2 : (out[i - 1].open + out[i - 1].close) / 2;
+    const hh = Math.max(c.high, ho, hc);
+    const hl = Math.min(c.low,  ho, hc);
+    out.push({ time: c.time, open: ho, high: hh, low: hl, close: hc, volume: c.volume });
+  }
+  return out;
+}
 type Indicator = "RSI" | "BB" | "VOL";
 
 interface Candle {
@@ -186,7 +200,7 @@ export default function TradingChartModal({
   // ── UI state ────────────────────────────────────────────────────────────────
   const [tf, setTf]         = useState<TfLabel>("1m");
   const [chartType, setCT]  = useState<ChartType>("candle");
-  const [indicators, setInd]= useState<Set<Indicator>>(new Set(["RSI", "BB", "VOL"] as Indicator[]));
+  const [indicators, setInd]= useState<Set<Indicator>>(new Set<Indicator>());
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState<string | null>(null);
   const [livePrice, setLP]  = useState<number | null>(null);
@@ -199,6 +213,18 @@ export default function TradingChartModal({
   const [indOpen,   setIndOpen] = useState(false);
   const indDropRef  = useRef<HTMLDivElement>(null);
 
+  // ── Replay state ─────────────────────────────────────────────────────────────
+  const [replayMode,    setReplayMode]    = useState(false);
+  const [replayPicking, setReplayPicking] = useState(false); // waiting for user to click start candle
+  const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replayIdx,     setReplayIdx]     = useState(0);
+  const [replaySpeed,   setReplaySpeed]   = useState(1);
+  const replayCandlesRef  = useRef<Candle[]>([]);
+  const replayIdxRef      = useRef(0);
+  const replayPlayingRef  = useRef(false);
+  const replayPickingRef  = useRef(false);
+  const replayTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // Close indicator dropdown on outside click
   useEffect(() => {
     if (!indOpen) return;
@@ -209,6 +235,27 @@ export default function TradingChartModal({
     return () => document.removeEventListener("mousedown", handler);
   }, [indOpen]);
 
+  // Clean up replay timer on unmount
+  useEffect(() => () => { if (replayTimerRef.current) clearInterval(replayTimerRef.current); }, []);
+
+  // Restart replay interval when speed changes mid-play
+  useEffect(() => {
+    if (!replayPlayingRef.current) return;
+    if (replayTimerRef.current) { clearInterval(replayTimerRef.current); replayTimerRef.current = null; }
+    const delay = Math.round(400 / replaySpeed);
+    replayTimerRef.current = setInterval(() => {
+      const next = replayIdxRef.current + 1;
+      if (next >= replayCandlesRef.current.length) {
+        clearInterval(replayTimerRef.current!); replayTimerRef.current = null;
+        replayPlayingRef.current = false; setReplayPlaying(false); return;
+      }
+      replayIdxRef.current = next; setReplayIdx(next);
+      applyReplayData(replayCandlesRef.current.slice(0, next + 1));
+    }, delay);
+    return () => { if (replayTimerRef.current) { clearInterval(replayTimerRef.current); replayTimerRef.current = null; } };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaySpeed]);
+
   // ── Stable refs ──────────────────────────────────────────────────────────────
   const chartDivRef  = useRef<HTMLDivElement>(null);
   const chartRef     = useRef<any>(null);
@@ -217,7 +264,7 @@ export default function TradingChartModal({
   const currentRef   = useRef<Candle | null>(null);
   const tfMinRef     = useRef(1);
   const ctRef        = useRef<ChartType>("candle");
-  const indRef       = useRef<Set<Indicator>>(new Set(["RSI", "BB", "VOL"] as Indicator[]));
+  const indRef       = useRef<Set<Indicator>>(new Set<Indicator>());
   const tlDataRef    = useRef<typeof tradeLines>(null);
   const tlSeriesRef  = useRef<{ ep:any; tp:any; sp:any } | null>(null);
   const isDarkRef    = useRef(isDark);
@@ -243,7 +290,7 @@ export default function TradingChartModal({
     let fetchPromise: Promise<Candle[]>;
 
     if (tfCfg.kiteInterval === "minute") {
-      // Full expiry period — from expiry cycle start date to today
+      // Full expiry period — all candles available for scroll history + replay
       const fromDate = getExpiryStart(expiry);
       fetchPromise = optionsApi
         .candleRange(token, fromDate, today, "minute")
@@ -320,7 +367,7 @@ export default function TradingChartModal({
         priceFormatter: (p: number) => `₹${p.toFixed(2)}`,
       },
       timeScale: { timeVisible: true, secondsVisible: false, borderColor: chartBdr },
-      rightPriceScale: { borderColor: chartBdr, scaleMargins: { top: 0.06, bottom: 0.06 } },
+      rightPriceScale: { borderColor: chartBdr, scaleMargins: { top: 0.06, bottom: 0.06 }, minimumWidth: 0 },
       autoSize: true,
     } as any);
 
@@ -329,61 +376,74 @@ export default function TradingChartModal({
     const ind = indRef.current;
 
     // Pane 0: main series
-    if (chartType === "candle") {
+    if (chartType === "candle" || chartType === "ha") {
       s.main = chart.addSeries(CandlestickSeries, {
         upColor: "#16a34a", downColor: "#dc2626",
         borderUpColor: "#16a34a", borderDownColor: "#dc2626",
         wickUpColor: "#16a34a", wickDownColor: "#dc2626",
       } as any, 0);
+    } else if (chartType === "area") {
+      s.main = chart.addSeries(AreaSeries, {
+        lineColor: clr, topColor: `${clr}55`, bottomColor: `${clr}05`,
+        lineWidth: 2, lastValueVisible: true, priceLineVisible: false,
+      } as any, 0);
     } else {
-      s.main = chart.addSeries(LineSeries, { color: clr, lineWidth: 2, lastValueVisible: true, priceLineVisible: false } as any, 0);
+      s.main = chart.addSeries(LineSeries, { color: clr, lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false } as any, 0);
     }
 
-    // BB overlay
-    const bbBase = { lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: ind.has("BB") };
+    // BB overlay — same pane, same right scale, but don't let extreme early values expand axis
+    const bbBase = {
+      lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: ind.has("BB"),
+      autoscaleInfoProvider: () => null,  // BB doesn't drive the price axis range
+    };
     s.bbUp  = chart.addSeries(LineSeries, { ...bbBase, color: "#a855f7", lineStyle: 1 } as any, 0);
     s.bbMid = chart.addSeries(LineSeries, { ...bbBase, color: "#a855f7", lineStyle: 2 } as any, 0);
     s.bbDn  = chart.addSeries(LineSeries, { ...bbBase, color: "#a855f7", lineStyle: 1 } as any, 0);
 
-    // Pane 1: volume
+    // Volume — overlay on main pane with invisible scale at bottom (TradingView style)
     s.vol = chart.addSeries(HistogramSeries, {
+      priceScaleId: "vol",
       priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, visible: ind.has("VOL"),
-    } as any, 1);
+    } as any, 0);
+    try {
+      chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 }, visible: false });
+    } catch {}
 
-    // Pane 2: RSI
-    s.rsi = chart.addSeries(LineSeries, {
-      color: "#f59e0b", lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false, visible: ind.has("RSI"),
-    } as any, 2);
-    if (ind.has("RSI")) {
+    // RSI — separate pane via pane-object API (avoids RSI values 0-100 mixing with prices)
+    try {
+      const panes = (chart as any).panes?.() ?? [];
+      const rsiPane = panes[1] ?? (chart as any).createPane?.();
+      if (rsiPane) {
+        s.rsi = rsiPane.addSeries(LineSeries, {
+          color: "#f59e0b", lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false, visible: ind.has("RSI"),
+        } as any);
+        rsiPane.setHeight(ind.has("RSI") ? 75 : 0);
+      }
+    } catch {}
+    if (!s.rsi) {
+      // Fallback: add on main pane with separate scale
+      s.rsi = chart.addSeries(LineSeries, {
+        priceScaleId: "rsi",
+        color: "#f59e0b", lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false, visible: ind.has("RSI"),
+      } as any, 0);
+      try { chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.7, bottom: 0 }, visible: false }); } catch {}
+    }
+    if (ind.has("RSI") && s.rsi) {
       try {
         s.rsi.createPriceLine({ price: 70, color: "rgba(220,38,38,0.5)", lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "70" });
         s.rsi.createPriceLine({ price: 30, color: "rgba(22,163,74,0.5)",  lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "30" });
       } catch {}
     }
 
-    // Pane heights — collapse hidden indicator panes to avoid empty gaps
-    try {
-      const p = (chart as any).panes?.();
-      if (p?.[1]) p[1].setHeight(ind.has("VOL") ? 55 : 0);
-      if (p?.[2]) p[2].setHeight(ind.has("RSI") ? 75 : 0);
-    } catch {}
-
     // Populate data
     const t = (c: Candle) => c.time as any;
     if (chartType === "candle") {
       s.main.setData(candles.map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+    } else if (chartType === "ha") {
+      s.main.setData(toHeikinAshi(candles).map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
     } else {
       s.main.setData(candles.map(c => ({ time: t(c), value: c.close })));
     }
-    // Pin right-side price axis to start at 0
-    s.main.applyOptions({
-      autoscaleInfoProvider: (original: () => any) => {
-        const res = original();
-        if (!res) return res;
-        return { ...res, priceRange: { ...res.priceRange, minValue: 0 } };
-      },
-    } as any);
-
     const bbV = candles.map((c, i) => ({ c, bb: bbArr[i] })).filter(x => x.bb.mid != null);
     s.bbUp.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.up!  })));
     s.bbMid.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.mid! })));
@@ -392,7 +452,18 @@ export default function TradingChartModal({
     const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
     s.rsi.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
 
-    chart.timeScale().fitContent();
+    // Default view: show last trading day's session (9:15–15:30); scroll left for history
+    if (tfCfg.kiteInterval === "minute" && candles.length > 0) {
+      const lastTime   = candles[candles.length - 1].time;
+      const lastDayStart = Math.floor(lastTime / 86400) * 86400;
+      const firstIdx   = candles.findIndex(c => c.time >= lastDayStart);
+      chart.timeScale().setVisibleLogicalRange({
+        from: firstIdx > 0 ? firstIdx - 1 : 0,
+        to:   candles.length - 0.5,
+      });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     // Crosshair tooltip
     chart.subscribeCrosshairMove((param: any) => {
@@ -443,7 +514,7 @@ export default function TradingChartModal({
       const s = seriesRef.current;
       if (!s.main) return;
       try {
-        if (ctRef.current === "candle")
+        if (ctRef.current === "candle" || ctRef.current === "ha")
           s.main.update({ time: bucket as any, open: curr.open, high: curr.high, low: curr.low, close: curr.close });
         else
           s.main.update({ time: bucket as any, value: curr.close });
@@ -464,13 +535,165 @@ export default function TradingChartModal({
     const s  = seriesRef.current;
     if (ind === "BB")  { s.bbUp?.applyOptions({ visible: on }); s.bbMid?.applyOptions({ visible: on }); s.bbDn?.applyOptions({ visible: on }); }
     if (ind === "VOL") { s.vol?.applyOptions({ visible: on }); }
-    if (ind === "RSI") { s.rsi?.applyOptions({ visible: on }); }
-    // Resize panes so empty panes don't leave a gap
+    if (ind === "RSI") {
+      s.rsi?.applyOptions({ visible: on });
+      // Resize RSI pane
+      try {
+        const p = (chartRef.current as any)?.panes?.();
+        if (p?.[1]) p[1].setHeight(on ? 75 : 0);
+      } catch {}
+    }
+  }
+
+  // ── Zoom / Scroll ─────────────────────────────────────────────────────────
+  function zoomChart(zoomIn: boolean) {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    const range = ts.getVisibleLogicalRange();
+    if (!range) return;
+    const center = (range.from + range.to) / 2;
+    const half   = (range.to - range.from) / 2;
+    ts.setVisibleLogicalRange({ from: center - half * (zoomIn ? 0.65 : 1.5), to: center + half * (zoomIn ? 0.65 : 1.5) });
+  }
+
+  function scrollChart(delta: number) {
+    chartRef.current?.timeScale().scrollToPosition(delta, true);
+  }
+
+  function fitToday() {
+    const ts = chartRef.current?.timeScale();
+    if (!ts) return;
+    // Find today's candle range in logical coords
+    const allCandles = replayMode ? replayCandlesRef.current.slice(0, replayIdxRef.current + 1) : rawRef.current;
+    if (!allCandles.length) { ts.fitContent(); return; }
+    const today = new Date();
+    const todayKey = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) / 1000;
+    const firstIdx = allCandles.findIndex(c => c.time >= todayKey);
+    if (firstIdx < 0) { ts.fitContent(); return; }
+    ts.setVisibleLogicalRange({ from: firstIdx - 0.5, to: allCandles.length - 0.5 });
+  }
+
+  // ── Replay helpers ────────────────────────────────────────────────────────
+  function applyReplayData(candles: Candle[]) {
+    const t = (c: Candle) => c.time as any;
+    const s = seriesRef.current;
+    if (!s.main || !chartRef.current) return;
     try {
-      const p = (chartRef.current as any)?.panes?.();
-      if (p?.[1]) p[1].setHeight(next.has("VOL") ? 55 : 0);
-      if (p?.[2]) p[2].setHeight(next.has("RSI") ? 75 : 0);
+      const closes = candles.map(c => c.close);
+      const bbArr  = computeBB(closes, 20, 2);
+      const rsiArr = computeRSI(closes, 14);
+      if (ctRef.current === "candle")
+        s.main.setData(candles.map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+      else if (ctRef.current === "ha")
+        s.main.setData(toHeikinAshi(candles).map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+      else
+        s.main.setData(candles.map(c => ({ time: t(c), value: c.close })));
+      const bbV = candles.map((c, i) => ({ c, bb: bbArr[i] })).filter(x => x.bb.mid != null);
+      s.bbUp?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.up! })));
+      s.bbMid?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.mid! })));
+      s.bbDn?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.dn! })));
+      s.vol?.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
+      const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
+      s.rsi?.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
+      // Auto-scroll: keep current candle at ~80% from left so history scrolls left
+      if (replayPlayingRef.current) {
+        const WINDOW = 60;
+        const RIGHT  = 5;
+        const from   = Math.max(0, candles.length - WINDOW + RIGHT);
+        chartRef.current.timeScale().setVisibleLogicalRange({ from, to: from + WINDOW });
+      }
     } catch {}
+  }
+
+  function startReplay() {
+    const all = rawRef.current;
+    if (!all.length || !chartRef.current) return;
+    const aggMin = tfCfg.aggMinutes;
+    replayCandlesRef.current = aggMin > 1 ? aggregate(all, aggMin) : all;
+    replayIdxRef.current = 0;
+    replayPlayingRef.current = false;
+    replayPickingRef.current  = true;
+    setReplayMode(true);
+    setReplayPicking(true);
+    setReplayPlaying(false);
+    setReplayIdx(0);
+    // Show full chart so user can click any candle as start point
+    const fullCandles = replayCandlesRef.current;
+    const t = (c: Candle) => c.time as any;
+    const s = seriesRef.current;
+    try {
+      if (ctRef.current === "candle")
+        s.main?.setData(fullCandles.map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+      else if (ctRef.current === "ha")
+        s.main?.setData(toHeikinAshi(fullCandles).map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+      else
+        s.main?.setData(fullCandles.map(c => ({ time: t(c), value: c.close })));
+    } catch {}
+    // Subscribe click once to pick start candle
+    const handler = (param: any) => {
+      if (!replayPickingRef.current) return;
+      if (param.logical == null) return;
+      const idx = Math.max(0, Math.min(Math.round(param.logical as number), replayCandlesRef.current.length - 1));
+      replayIdxRef.current  = idx;
+      replayPickingRef.current = false;
+      setReplayPicking(false);
+      setReplayIdx(idx);
+      applyReplayData(replayCandlesRef.current.slice(0, idx + 1));
+      chartRef.current?.unsubscribeClick(handler);
+    };
+    chartRef.current.subscribeClick(handler);
+  }
+
+  function stopReplay() {
+    if (replayTimerRef.current) { clearInterval(replayTimerRef.current); replayTimerRef.current = null; }
+    replayPlayingRef.current  = false;
+    replayPickingRef.current  = false;
+    setReplayMode(false);
+    setReplayPicking(false);
+    setReplayPlaying(false);
+    setReplayIdx(0);
+    replayIdxRef.current = 0;
+    // Restore full aggregated candles
+    const aggMin  = tfCfg.aggMinutes;
+    const candles = aggMin > 1 ? aggregate(rawRef.current, aggMin) : rawRef.current;
+    applyReplayData(candles);
+    chartRef.current?.timeScale().fitContent();
+  }
+
+  function toggleReplayPlay() {
+    if (replayPlayingRef.current) {
+      // pause
+      clearInterval(replayTimerRef.current!);
+      replayTimerRef.current = null;
+      replayPlayingRef.current = false;
+      setReplayPlaying(false);
+    } else {
+      // play
+      replayPlayingRef.current = true;
+      setReplayPlaying(true);
+      const delay = Math.round(400 / replaySpeed);
+      replayTimerRef.current = setInterval(() => {
+        const next = replayIdxRef.current + 1;
+        if (next >= replayCandlesRef.current.length) {
+          clearInterval(replayTimerRef.current!);
+          replayTimerRef.current = null;
+          replayPlayingRef.current = false;
+          setReplayPlaying(false);
+          return;
+        }
+        replayIdxRef.current = next;
+        setReplayIdx(next);
+        applyReplayData(replayCandlesRef.current.slice(0, next + 1));
+      }, delay);
+    }
+  }
+
+  function stepReplay(delta: number) {
+    if (replayPlayingRef.current) return; // don't step while playing
+    const next = Math.max(0, Math.min(replayCandlesRef.current.length - 1, replayIdxRef.current + delta));
+    replayIdxRef.current = next;
+    setReplayIdx(next);
+    applyReplayData(replayCandlesRef.current.slice(0, next + 1));
   }
 
   // ── Trade line helpers ────────────────────────────────────────────────────
@@ -571,28 +794,20 @@ export default function TradingChartModal({
           </SelectContent>
         </Select>
 
-        {/* Chart type */}
-        <div className="flex rounded overflow-hidden flex-shrink-0" style={{ border: `1px solid ${border}` }}>
-          <button onClick={() => setCT("candle")} title="Candlestick"
-            className="w-7 h-7 flex items-center justify-center cursor-pointer transition-colors"
-            style={{ background: chartType === "candle" ? clr : "transparent", color: chartType === "candle" ? "#fff" : txtMuted }}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <rect x="1" y="3" width="3.5" height="5" rx="0.4" fill="currentColor"/>
-              <line x1="2.75" y1="1" x2="2.75" y2="3"   stroke="currentColor" strokeWidth="1.4"/>
-              <line x1="2.75" y1="8" x2="2.75" y2="11"  stroke="currentColor" strokeWidth="1.4"/>
-              <rect x="7.5" y="4.5" width="3.5" height="3" rx="0.4" fill="currentColor" opacity="0.55"/>
-              <line x1="9.25" y1="2" x2="9.25" y2="4.5"  stroke="currentColor" strokeWidth="1.4"/>
-              <line x1="9.25" y1="7.5" x2="9.25" y2="10" stroke="currentColor" strokeWidth="1.4"/>
-            </svg>
-          </button>
-          <button onClick={() => setCT("line")} title="Line"
-            className="w-7 h-7 flex items-center justify-center cursor-pointer transition-colors"
-            style={{ background: chartType === "line" ? clr : "transparent", color: chartType === "line" ? "#fff" : txtMuted }}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <polyline points="1,9 3.5,5.5 6,7 9,3 11,4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-        </div>
+        {/* Chart type dropdown */}
+        <Select value={chartType} onValueChange={(v) => setCT(v as ChartType)}>
+          <SelectTrigger
+            className="h-7 w-[90px] text-[9px] font-bold border-0 shadow-none px-2 rounded cursor-pointer"
+            style={{ ...MONO, background: btnBg, color: txtPrimary, border: `1px solid ${border}` }}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="z-[200]">
+            <SelectItem value="candle" className="text-[9px] font-bold" style={MONO}>Candle</SelectItem>
+            <SelectItem value="ha"     className="text-[9px] font-bold" style={MONO}>Heikin Ashi</SelectItem>
+            <SelectItem value="line"   className="text-[9px] font-bold" style={MONO}>Line</SelectItem>
+            <SelectItem value="area"   className="text-[9px] font-bold" style={MONO}>Area</SelectItem>
+          </SelectContent>
+        </Select>
 
         {/* Indicators multi-select dropdown */}
         <div className="relative flex-shrink-0" ref={indDropRef}>
@@ -651,8 +866,8 @@ export default function TradingChartModal({
 
         {/* OHLC single line — top-left, appears on crosshair move */}
         {!loading && !error && ohlc && (
-          <div className="absolute top-2 left-2 z-20 flex items-center gap-2 px-1.5 py-0.5 rounded text-[8px]"
-            style={{ ...MONO, background: isDark ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.7)", backdropFilter: "blur(4px)" }}>
+          <div className="absolute top-2 left-2 z-20 flex items-center gap-2 px-1.5 py-0.5 rounded text-[9px] font-bold"
+            style={{ ...MONO, background: isDark ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.8)", backdropFilter: "blur(4px)" }}>
             <span style={{ color: txtMuted }}>O<span style={{ color: txtPrimary }}> {ohlc.o.toFixed(2)}</span></span>
             <span style={{ color: txtMuted }}>H<span style={{ color: "#16a34a" }}> {ohlc.h.toFixed(2)}</span></span>
             <span style={{ color: txtMuted }}>L<span style={{ color: "#dc2626" }}> {ohlc.l.toFixed(2)}</span></span>
@@ -701,6 +916,106 @@ export default function TradingChartModal({
               style={{ ...MONO, background: btnBg, color: txtMuted }}>Retry</button>
           </div>
         )}
+        {/* ── Replay pick-start overlay ── */}
+        {replayPicking && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
+            <div className="px-4 py-2 rounded-lg text-[11px] font-bold text-center"
+              style={{ ...MONO, background: "rgba(245,158,11,0.92)", color: "#000", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
+              Click any candle to start replay from that point
+            </div>
+          </div>
+        )}
+
+        {/* ── Chart nav + replay controls — bottom below buy/sell ── */}
+        {!loading && !error && (
+          <div className="absolute left-2 z-20 flex items-center gap-1 flex-wrap" style={{ bottom: "70px" }}>
+            {/* Scroll left */}
+            <button onClick={() => scrollChart(-15)} title="Scroll left"
+              className="w-6 h-6 flex items-center justify-center rounded cursor-pointer opacity-60 hover:opacity-100"
+              style={{ background: isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.85)", color: txtPrimary, border: `1px solid ${border}` }}>
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M5 1L2 4l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            </button>
+            {/* Zoom in */}
+            <button onClick={() => zoomChart(true)} title="Zoom in"
+              className="w-6 h-6 flex items-center justify-center rounded cursor-pointer opacity-60 hover:opacity-100 text-[11px] font-bold"
+              style={{ background: isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.85)", color: txtPrimary, border: `1px solid ${border}`, ...MONO }}>
+              +
+            </button>
+            {/* Zoom out */}
+            <button onClick={() => zoomChart(false)} title="Zoom out"
+              className="w-6 h-6 flex items-center justify-center rounded cursor-pointer opacity-60 hover:opacity-100 text-[11px] font-bold"
+              style={{ background: isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.85)", color: txtPrimary, border: `1px solid ${border}`, ...MONO }}>
+              −
+            </button>
+            {/* Scroll right */}
+            <button onClick={() => scrollChart(15)} title="Scroll right"
+              className="w-6 h-6 flex items-center justify-center rounded cursor-pointer opacity-60 hover:opacity-100"
+              style={{ background: isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.85)", color: txtPrimary, border: `1px solid ${border}` }}>
+              <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M3 1l3 3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            </button>
+            {/* Today */}
+            <button onClick={fitToday} title="Fit to today"
+              className="h-6 px-1.5 flex items-center justify-center rounded cursor-pointer opacity-60 hover:opacity-100 text-[9px] font-bold"
+              style={{ background: isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.85)", color: txtPrimary, border: `1px solid ${border}`, ...MONO }}>
+              1D
+            </button>
+
+            {/* Replay button / controls */}
+            {!replayMode ? (
+              <button onClick={startReplay} title="Replay"
+                className="h-6 px-2 flex items-center gap-1 rounded cursor-pointer opacity-70 hover:opacity-100 text-[9px] font-bold"
+                style={{ background: isDark ? "rgba(15,23,42,0.85)" : "rgba(255,255,255,0.85)", color: "#f59e0b", border: `1px solid #f59e0b50`, ...MONO }}>
+                <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><polygon points="1,0 8,4 1,8" fill="currentColor"/></svg>
+                Replay
+              </button>
+            ) : replayPicking ? (
+              <button onClick={stopReplay}
+                className="h-6 px-2 flex items-center gap-1 rounded cursor-pointer text-[9px] font-bold"
+                style={{ background: "#f59e0b", color: "#000", ...MONO }}>
+                Cancel
+              </button>
+            ) : (
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded"
+                style={{ background: isDark ? "rgba(15,23,42,0.92)" : "rgba(255,255,255,0.92)", border: `1px solid #f59e0b60` }}>
+                {/* Step back */}
+                <button onClick={() => stepReplay(-1)} disabled={replayPlaying} title="Step back"
+                  className="w-5 h-5 flex items-center justify-center rounded cursor-pointer opacity-70 hover:opacity-100 disabled:opacity-30"
+                  style={{ color: "#f59e0b" }}>
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M7 1L3 4l4 3V1z" fill="currentColor"/><rect x="0" y="1" width="1.5" height="6" rx="0.5" fill="currentColor"/></svg>
+                </button>
+                {/* Play/Pause */}
+                <button onClick={toggleReplayPlay} title={replayPlaying ? "Pause" : "Play"}
+                  className="w-5 h-5 flex items-center justify-center rounded cursor-pointer"
+                  style={{ color: "#f59e0b" }}>
+                  {replayPlaying
+                    ? <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><rect x="0" y="0" width="3" height="8" rx="0.5" fill="currentColor"/><rect x="5" y="0" width="3" height="8" rx="0.5" fill="currentColor"/></svg>
+                    : <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><polygon points="0,0 8,4 0,8" fill="currentColor"/></svg>}
+                </button>
+                {/* Step forward */}
+                <button onClick={() => stepReplay(1)} disabled={replayPlaying} title="Step forward"
+                  className="w-5 h-5 flex items-center justify-center rounded cursor-pointer opacity-70 hover:opacity-100 disabled:opacity-30"
+                  style={{ color: "#f59e0b" }}>
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 1l4 3-4 3V1z" fill="currentColor"/><rect x="6.5" y="1" width="1.5" height="6" rx="0.5" fill="currentColor"/></svg>
+                </button>
+                {/* Speed */}
+                <button onClick={() => setReplaySpeed(s => s === 1 ? 2 : s === 2 ? 4 : 1)}
+                  className="text-[8px] font-bold px-1 cursor-pointer"
+                  style={{ ...MONO, color: "#f59e0b" }}>{replaySpeed}x</button>
+                {/* Counter */}
+                <span className="text-[8px] font-bold" style={{ ...MONO, color: "#f59e0b" }}>
+                  {replayIdx + 1}/{replayCandlesRef.current.length}
+                </span>
+                {/* Stop */}
+                <button onClick={stopReplay} title="Stop"
+                  className="w-5 h-5 flex items-center justify-center rounded cursor-pointer opacity-70 hover:opacity-100"
+                  style={{ color: "#e11d48" }}>
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><rect x="0" y="0" width="8" height="8" rx="1" fill="currentColor"/></svg>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div ref={chartDivRef} className="absolute inset-0" />
       </div>
 

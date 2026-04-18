@@ -22,7 +22,7 @@ import { LOT_SIZE } from "@/lib/constants";
 import { useTheme } from "@/lib/theme";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type TfLabel = "1m" | "3m" | "5m" | "10m" | "15m" | "1h" | "4h" | "1D";
+type TfLabel = "1m" | "3m" | "5m" | "10m" | "15m" | "1h" | "4h" | "1D" | "1W";
 type ChartType = "candle" | "ha" | "line" | "area";
 
 function toHeikinAshi(candles: Candle[]): Candle[] {
@@ -56,6 +56,7 @@ export interface TradingChartModalProps {
   sym: string;
   tradingsymbol?: string;
   index?: string;        // "NIFTY" | "SENSEX"
+  isEquity?: boolean;   // NSE equity stock (no strike/expiry)
   onClose: () => void;
 }
 
@@ -65,14 +66,15 @@ const MONO = { fontFamily: "'Space Mono', monospace" } as const;
 type TfConfig = { label: TfLabel; kiteInterval: string; fromDays: number; aggMinutes: number };
 
 const TF_LIST: TfConfig[] = [
-  { label: "1m",  kiteInterval: "minute",   fromDays: 2,  aggMinutes: 1   },
-  { label: "3m",  kiteInterval: "minute",   fromDays: 2,  aggMinutes: 3   },
-  { label: "5m",  kiteInterval: "minute",   fromDays: 3,  aggMinutes: 5   },
-  { label: "10m", kiteInterval: "minute",   fromDays: 4,  aggMinutes: 10  },
-  { label: "15m", kiteInterval: "minute",   fromDays: 5,  aggMinutes: 15  },
-  { label: "1h",  kiteInterval: "60minute", fromDays: 20, aggMinutes: 0   },
-  { label: "4h",  kiteInterval: "60minute", fromDays: 45, aggMinutes: 240 },
-  { label: "1D",  kiteInterval: "day",      fromDays: 90, aggMinutes: 0   },
+  { label: "1m",  kiteInterval: "minute",   fromDays: 2,   aggMinutes: 1    },
+  { label: "3m",  kiteInterval: "minute",   fromDays: 2,   aggMinutes: 3    },
+  { label: "5m",  kiteInterval: "minute",   fromDays: 3,   aggMinutes: 5    },
+  { label: "10m", kiteInterval: "minute",   fromDays: 4,   aggMinutes: 10   },
+  { label: "15m", kiteInterval: "minute",   fromDays: 5,   aggMinutes: 15   },
+  { label: "1h",  kiteInterval: "60minute", fromDays: 20,  aggMinutes: 0    },
+  { label: "4h",  kiteInterval: "60minute", fromDays: 45,  aggMinutes: 240  },
+  { label: "1D",  kiteInterval: "day",      fromDays: 90,  aggMinutes: 0    },
+  { label: "1W",  kiteInterval: "day",      fromDays: 1825, aggMinutes: 7200 },
 ];
 
 const HOLIDAYS_2026 = new Set([
@@ -106,6 +108,26 @@ function dateFromDaysAgo(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString().split("T")[0];
+}
+
+// ── Zerodha charge calculator (Kite brokerage structure) ─────────────────────
+function calcEquityCharges(price: number, qty: number, isIntraday: boolean) {
+  const turnover = price * qty;
+  // Brokerage: delivery = ₹0; intraday = min(0.03%, ₹20) per leg
+  const brokPerLeg = isIntraday ? Math.min(turnover * 0.0003, 20) : 0;
+  const brokerage  = brokPerLeg * 2; // buy + sell legs
+  // STT: delivery = 0.1% both sides; intraday = 0.025% sell only
+  const stt = isIntraday ? turnover * 0.00025 : turnover * 0.002;
+  // Exchange transaction charges (NSE): 0.00307%
+  const txn  = turnover * 0.0000307 * 2;
+  // SEBI turnover fee: ₹10/crore = 0.000001 per ₹
+  const sebi = turnover * 0.000001 * 2;
+  // Stamp duty on buy side only: intraday 0.003%; delivery 0.015%
+  const stamp = turnover * (isIntraday ? 0.00003 : 0.00015);
+  // GST 18% on (brokerage + SEBI + transaction)
+  const gst  = (brokerage + sebi + txn) * 0.18;
+  const total = brokerage + stt + txn + sebi + stamp + gst;
+  return { brokerage, stt, txn, sebi, stamp, gst, total };
 }
 
 // Returns the first trading day of the current expiry cycle.
@@ -177,7 +199,7 @@ function computeBB(closes: number[], period = 20, mult = 2) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function TradingChartModal({
-  token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", onClose,
+  token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, onClose,
 }: TradingChartModalProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -211,6 +233,9 @@ export default function TradingChartModal({
   const [orderLots, setOL]  = useState(1);
   const [tradeOpen, setTO]  = useState(false); // footer trade panel visibility
   const [indOpen,   setIndOpen] = useState(false);
+  const [equityMode, setEquityMode] = useState<"intraday" | "swing">(isEquity ? "swing" : "intraday");
+  const [equityQty, setEquityQty] = useState(1);
+  const [equityQtyStr, setEquityQtyStr] = useState("1");
   const indDropRef  = useRef<HTMLDivElement>(null);
 
   // ── Replay state ─────────────────────────────────────────────────────────────
@@ -270,8 +295,13 @@ export default function TradingChartModal({
   const isDarkRef    = useRef(isDark);
 
   const isCE  = type === "CE";
-  const clr   = isCE ? "#0284c7" : "#dc2626";
+  const clr   = isEquity ? "#16a34a" : isCE ? "#0284c7" : "#dc2626";
+  const chartLabel = isEquity
+    ? (tradingsymbol ?? sym ?? `Token ${token}`)
+    : `${index} ${strike} ${type}`;
   const tfCfg = TF_LIST.find(t => t.label === tf)!;
+  // All TFs available for all charts; 1W only makes sense for equity but allowed everywhere
+  const availableTFs = TF_LIST;
 
   // ── Fetch wallet ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -289,31 +319,36 @@ export default function TradingChartModal({
 
     let fetchPromise: Promise<Candle[]>;
 
-    if (tfCfg.kiteInterval === "minute") {
-      // Full expiry period — all candles available for scroll history + replay
-      const fromDate = getExpiryStart(expiry);
+    const mapRows = (d: any): Candle[] =>
+      (d.rows ?? []).map((r: any) => ({
+        time: istToUnix(r.date), open: r.open, high: r.high,
+        low: r.low, close: r.close, volume: r.volume ?? 0,
+      }));
+
+    if (tfCfg.kiteInterval === "day") {
+      // Daily candles: equity gets 5 years, options get standard 90 days
+      const fromDate = isEquity ? dateFromDaysAgo(1825) : dateFromDaysAgo(tfCfg.fromDays);
+      fetchPromise = optionsApi
+        .candleRange(token, fromDate, today, "day")
+        .catch(() => ({ rows: [] }))
+        .then(mapRows);
+    } else if (tfCfg.kiteInterval === "minute") {
+      // Intraday minute: equity gets last 5 days, options get full expiry period
+      const fromDate = isEquity ? dateFromDaysAgo(5) : getExpiryStart(expiry);
       fetchPromise = optionsApi
         .candleRange(token, fromDate, today, "minute")
         .catch(() => ({ rows: [] }))
-        .then((d: any) => (d.rows ?? []).map((r: any) => ({
-          time: istToUnix(r.date), open: r.open, high: r.high,
-          low: r.low, close: r.close, volume: r.volume ?? 0,
-        })));
+        .then(mapRows);
     } else {
-      // Multi-day range fetch with the correct kite interval
-      const fromDate = dateFromDaysAgo(tfCfg.fromDays);
+      // 60minute (1h, 4h): use standard fromDays
       fetchPromise = optionsApi
-        .candleRange(token, fromDate, today, tfCfg.kiteInterval)
+        .candleRange(token, dateFromDaysAgo(tfCfg.fromDays), today, tfCfg.kiteInterval)
         .catch(() => ({ rows: [] }))
-        .then((d: any) => (d.rows ?? []).map((r: any) => ({
-          time: istToUnix(r.date), open: r.open, high: r.high,
-          low: r.low, close: r.close, volume: r.volume ?? 0,
-        })));
+        .then(mapRows);
     }
 
     fetchPromise
       .then(candles => {
-        // Strip pre/post-market candles for all intraday intervals
         rawRef.current = tfCfg.kiteInterval === "day" ? candles : filterMarketHours(candles);
         setLoading(false);
       })
@@ -355,18 +390,41 @@ export default function TradingChartModal({
         // istToUnix encodes IST time as UTC, so read UTC fields directly — no offset needed
         timeFormatter: (ts: number) => {
           const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-          const d   = new Date(ts * 1000);
-          const day = d.getUTCDate();
-          const mon = MONTHS[d.getUTCMonth()];
-          const h   = d.getUTCHours();
-          const m   = String(d.getUTCMinutes()).padStart(2, "0");
-          const ap  = h >= 12 ? "PM" : "AM";
-          const h12 = h % 12 || 12;
-          return `${day} ${mon} ${h12}:${m} ${ap}`;
+          const d    = new Date(ts * 1000);
+          const day  = d.getUTCDate();
+          const mon  = MONTHS[d.getUTCMonth()];
+          const yr   = d.getUTCFullYear();
+          const h    = d.getUTCHours();
+          const m    = String(d.getUTCMinutes()).padStart(2, "0");
+          const ap   = h >= 12 ? "PM" : "AM";
+          const h12  = h % 12 || 12;
+          // Daily candle: show date + year only
+          if (h === 0 && m === "00") return `${day} ${mon} ${yr}`;
+          return `${day} ${mon} ${yr} ${h12}:${m} ${ap}`;
         },
         priceFormatter: (p: number) => `₹${p.toFixed(2)}`,
       },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: chartBdr },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        borderColor: chartBdr,
+        tickMarkFormatter: (ts: number, tickType: number) => {
+          const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          const d  = new Date(ts * 1000);
+          const yr = d.getUTCFullYear();
+          const mo = MONTHS[d.getUTCMonth()];
+          const dy = d.getUTCDate();
+          const h  = d.getUTCHours();
+          const mi = String(d.getUTCMinutes()).padStart(2, "0");
+          // tickType: 0=Year 1=Month 2=Day 3=Time
+          if (tickType === 0) return String(yr);
+          if (tickType === 1) return `${mo} ${yr}`;
+          if (tickType === 2) return `${dy} ${mo} ${yr}`;
+          const ap  = h >= 12 ? "PM" : "AM";
+          const h12 = h % 12 || 12;
+          return `${h12}:${mi} ${ap}`;
+        },
+      },
       rightPriceScale: { borderColor: chartBdr, scaleMargins: { top: 0.06, bottom: 0.06 }, minimumWidth: 0 },
       autoSize: true,
     } as any);
@@ -711,7 +769,8 @@ export default function TradingChartModal({
     if (!tsym) { setOS({ loading: false, result: "✗ No trading symbol" }); return; }
     setOS({ loading: true, result: null });
     try {
-      await accountApi.placeOrder(tsym, action, orderLots * LOT_SIZE);
+      const qty = isEquity ? equityQty : orderLots * LOT_SIZE;
+      await accountApi.placeOrder(tsym, action, qty, isEquity ? "NSE" : undefined);
       const entry     = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
       const rr        = calcRR(entry);
       const now       = new Date();
@@ -733,11 +792,23 @@ export default function TradingChartModal({
   }
 
   // ── Computed for footer ───────────────────────────────────────────────────
-  const liveOrLast = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
-  const approxBuy  = liveOrLast * orderLots * LOT_SIZE;
-  const canBuy     = wallet === null || wallet >= approxBuy;
-  const fmtWallet  = wallet !== null ? `₹${wallet.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—";
-  const approxClr  = !canBuy ? "#e11d48" : txtPrimary;
+  const liveOrLast   = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
+  const isIntraday5x = isEquity && equityMode === "intraday";
+  // 5x margin leverage for equity intraday
+  const effectiveWallet = isIntraday5x && wallet !== null ? wallet * 5 : wallet;
+  // Charges (equity only; options charges shown separately)
+  const eqCharges    = isEquity && liveOrLast > 0
+    ? calcEquityCharges(liveOrLast, equityQty, isIntraday5x)
+    : null;
+  const stockCost    = isEquity ? liveOrLast * equityQty : liveOrLast * orderLots * LOT_SIZE;
+  const approxBuy    = isEquity ? stockCost + (eqCharges?.total ?? 0) : stockCost;
+  // Max shares affordable with effective wallet
+  const maxQty       = isEquity && liveOrLast > 0 && effectiveWallet !== null
+    ? Math.floor(effectiveWallet / liveOrLast)
+    : null;
+  const canBuy       = effectiveWallet === null || effectiveWallet >= approxBuy;
+  const fmtWallet    = effectiveWallet !== null ? `₹${effectiveWallet.toLocaleString("en-IN", { maximumFractionDigits: 0 })}` : "—";
+  const approxClr    = !canBuy ? "#e11d48" : txtPrimary;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   // Fills absolute inset-0 of parent — no overlay/modal
@@ -756,13 +827,24 @@ export default function TradingChartModal({
           <span className="text-[9px] font-bold hidden sm:inline" style={MONO}>Back</span>
         </button>
 
-        {/* Large screen: symbol label + Buy/Sell — next to Back button */}
+        {/* Equity: stock name label (same pill style as options) */}
+        {isEquity && !loading && !error && (
+          <span className="flex items-center h-7 px-2.5 rounded text-[9px] font-black flex-shrink-0"
+            style={{ ...MONO, color: "#16a34a", background: "#16a34a15", border: "1px solid #16a34a40" }}>
+            {chartLabel}
+          </span>
+        )}
+
+        {/* Large screen: options symbol + Buy/Sell */}
         {!loading && !error && (
           <div className="hidden lg:flex items-center gap-1.5 flex-shrink-0">
-            <span className="flex items-center h-7 px-2.5 rounded text-[9px] font-black"
-              style={{ ...MONO, color: isCE ? "#38bdf8" : "#f472b6", background: isCE ? "#38bdf815" : "#f472b615", border: `1px solid ${isCE ? "#38bdf840" : "#f472b640"}` }}>
-              {index} {strike} {type}
-            </span>
+            {/* Options symbol badge */}
+            {!isEquity && (
+              <span className="flex items-center h-7 px-2.5 rounded text-[9px] font-black"
+                style={{ ...MONO, color: isCE ? "#38bdf8" : "#f472b6", background: isCE ? "#38bdf815" : "#f472b615", border: `1px solid ${isCE ? "#38bdf840" : "#f472b640"}` }}>
+                {chartLabel}
+              </span>
+            )}
             <button onClick={() => setTO(v => !v)}
               className="h-7 px-2.5 rounded text-[9px] font-black cursor-pointer transition-all"
               style={{ ...MONO, background: tradeOpen ? "#e11d48" : "#e11d4820", color: tradeOpen ? "#fff" : "#e11d48", border: "1px solid #e11d4840" }}>
@@ -786,7 +868,7 @@ export default function TradingChartModal({
             <SelectValue />
           </SelectTrigger>
           <SelectContent className="z-[200]">
-            {TF_LIST.map(({ label }) => (
+            {availableTFs.map(({ label }) => (
               <SelectItem key={label} value={label} className="text-[9px] font-bold" style={MONO}>
                 {label}
               </SelectItem>
@@ -878,11 +960,12 @@ export default function TradingChartModal({
         {/* Symbol badge + Buy/Sell toggles — bottom-left (small screens only) */}
         {!loading && !error && (
           <div className="lg:hidden absolute left-2 z-20 flex flex-col gap-1 items-start" style={{ bottom: "100px" }}>
+            {/* Symbol badge — same pill style for both equity and options */}
             <span className="text-[9px] font-black px-2 py-0.5 rounded"
-              style={{ ...MONO, color: isCE ? "#38bdf8" : "#f472b6",
+              style={{ ...MONO, color: isEquity ? "#16a34a" : isCE ? "#38bdf8" : "#f472b6",
                 background: isDark ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.75)",
-                backdropFilter: "blur(6px)", border: `1px solid ${isCE ? "#38bdf840" : "#f472b640"}` }}>
-              {index} {strike} {type}
+                backdropFilter: "blur(6px)", border: `1px solid ${isEquity ? "#16a34a40" : isCE ? "#38bdf840" : "#f472b640"}` }}>
+              {chartLabel}
             </span>
             <div className="flex gap-1.5">
               <button onClick={() => setTO(v => !v)}
@@ -904,7 +987,7 @@ export default function TradingChartModal({
             style={{ background: panelBg }}>
             <div className="w-7 h-7 rounded-full border-2 animate-spin"
               style={{ borderColor: border, borderTopColor: clr }} />
-            <span className="text-[10px]" style={{ ...MONO, color: txtMuted }}>Loading {strike} {type} chart…</span>
+            <span className="text-[10px]" style={{ ...MONO, color: txtMuted }}>Loading {chartLabel} chart…</span>
           </div>
         )}
         {error && !loading && (
@@ -1019,20 +1102,45 @@ export default function TradingChartModal({
         <div ref={chartDivRef} className="absolute inset-0" />
       </div>
 
-      {/* ══ FOOTER — exact scalper design, hidden until Buy/Sell clicked ══ */}
+      {/* ══ FOOTER — shows for options always; equity only in intraday mode ══ */}
       {tradeOpen && (
       <div className="flex-shrink-0" style={{ borderTop: `1px solid ${border}`, background: panelBg }}>
+
+        {/* Equity mode toggle — Intraday / Equity */}
+        {isEquity && (
+          <div className="flex items-center px-4 py-2" style={{ borderBottom: `1px solid ${divider}` }}>
+            <div className="flex items-center rounded-lg overflow-hidden"
+              style={{ border: `1px solid ${border}` }}>
+              {(["intraday", "swing"] as const).map(m => (
+                <button key={m}
+                  onClick={() => setEquityMode(m)}
+                  className="px-3 h-7 text-[9px] font-bold cursor-pointer transition-colors"
+                  style={{ ...MONO, background: equityMode === m ? "#16a34a" : "transparent", color: equityMode === m ? "#fff" : txtMuted }}>
+                  {m === "intraday" ? "Intraday" : "Equity"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Row 1: symbol + action badge + live price */}
         <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: `1px solid ${divider}` }}>
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-[11px] font-bold truncate" style={{ ...MONO, color: txtPrimary }}>
-              {index} {strike} {type}
+              {chartLabel}
             </span>
-            <span className="text-[8px] px-1.5 py-0.5 rounded font-bold flex-shrink-0"
-              style={{ ...MONO, background: isCE ? "#0284c720" : "#e11d4820", color: isCE ? "#0284c7" : "#e11d48" }}>
-              {type}
-            </span>
+            {!isEquity && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded font-bold flex-shrink-0"
+                style={{ ...MONO, background: isCE ? "#0284c720" : "#e11d4820", color: isCE ? "#0284c7" : "#e11d48" }}>
+                {type}
+              </span>
+            )}
+            {isEquity && (
+              <span className="text-[8px] px-1.5 py-0.5 rounded font-bold flex-shrink-0"
+                style={{ ...MONO, background: "#16a34a20", color: "#16a34a" }}>
+                NSE
+              </span>
+            )}
             {liveOrLast > 0 && (
               <span className="text-[13px] font-black flex-shrink-0" style={{ ...MONO, color: txtPrimary }}>
                 ₹{liveOrLast.toFixed(2)}
@@ -1054,45 +1162,123 @@ export default function TradingChartModal({
           </div>
         </div>
 
-        {/* Row 2: Wallet + Approx Req */}
+        {/* Row 2: Available wallet + Total cost */}
         <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: `1px solid ${divider}` }}>
           <div className="flex flex-col items-start gap-0.5">
-            <span className="text-[8px] uppercase" style={{ ...MONO, color: txtMuted }}>Available</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[8px] uppercase" style={{ ...MONO, color: txtMuted }}>Available</span>
+              {isIntraday5x && (
+                <span className="text-[7px] font-black px-1 py-0.5 rounded"
+                  style={{ background: "#f59e0b20", color: "#f59e0b", border: "1px solid #f59e0b40", ...MONO }}>
+                  5x
+                </span>
+              )}
+              {isIntraday5x && maxQty !== null && (
+                <span className="text-[7px]" style={{ ...MONO, color: txtMuted }}>
+                  max {maxQty} shares
+                </span>
+              )}
+            </div>
             <span className="text-[12px] font-bold"
-              style={{ ...MONO, color: wallet !== null && !canBuy ? "#e11d48" : "#16a34a" }}>
+              style={{ ...MONO, color: effectiveWallet !== null && !canBuy ? "#e11d48" : "#16a34a" }}>
               {fmtWallet}
             </span>
           </div>
           <div className="flex flex-col items-end gap-0.5">
-            <span className="text-[8px] uppercase" style={{ ...MONO, color: txtMuted }}>Approx Req</span>
+            <span className="text-[8px] uppercase" style={{ ...MONO, color: txtMuted }}>
+              {isEquity ? "Stock + Charges" : "Approx Req"}
+            </span>
             <span className="text-[12px] font-bold" style={{ ...MONO, color: approxClr }}>
               ₹{approxBuy.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
             </span>
           </div>
         </div>
 
-        {/* Row 3: Lots */}
+        {/* Equity charges breakdown */}
+        {isEquity && eqCharges !== null && equityQty > 0 && liveOrLast > 0 && (
+          <div className="px-4 py-1.5 flex flex-wrap gap-x-3 gap-y-0.5" style={{ borderBottom: `1px solid ${divider}`, background: isDark ? "#0a0f1a" : "#f8fafc" }}>
+            <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>
+              Stock <span style={{ color: txtPrimary }}>₹{stockCost.toLocaleString("en-IN", { maximumFractionDigits: 0 })}</span>
+            </span>
+            {isIntraday5x && (
+              <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>
+                Brok <span style={{ color: txtPrimary }}>₹{eqCharges.brokerage.toFixed(2)}</span>
+              </span>
+            )}
+            <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>
+              STT <span style={{ color: txtPrimary }}>₹{eqCharges.stt.toFixed(2)}</span>
+            </span>
+            <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>
+              Txn <span style={{ color: txtPrimary }}>₹{eqCharges.txn.toFixed(2)}</span>
+            </span>
+            <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>
+              GST <span style={{ color: txtPrimary }}>₹{eqCharges.gst.toFixed(2)}</span>
+            </span>
+            <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>
+              Stamp <span style={{ color: txtPrimary }}>₹{eqCharges.stamp.toFixed(2)}</span>
+            </span>
+            <span className="text-[8px] font-bold ml-auto" style={{ ...MONO, color: "#f59e0b" }}>
+              Total charges ₹{eqCharges.total.toFixed(2)}
+            </span>
+          </div>
+        )}
+
+        {/* Row 3: Qty (equity) / Lots (options) */}
         <div className="px-4 py-2.5 flex items-center gap-3" style={{ borderBottom: `1px solid ${divider}` }}>
-          <span className="text-[9px] uppercase" style={{ ...MONO, color: txtMuted }}>Lots</span>
-          <button onClick={() => setOL(v => Math.max(1, v - 1))}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
-            style={{ background: btnBg, color: btnClr }}>−</button>
-          <span className="text-[14px] font-bold w-6 text-center" style={{ ...MONO, color: txtPrimary }}>
-            {orderLots}
-          </span>
-          <button onClick={() => setOL(v => v + 1)}
-            className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
-            style={{ background: btnBg, color: btnClr }}>+</button>
-          <span className="text-[9px] ml-auto" style={{ ...MONO, color: txtMuted }}>
-            {orderLots} × {LOT_SIZE} = {orderLots * LOT_SIZE} qty
-          </span>
+          {isEquity ? (
+            <>
+              <span className="text-[9px] uppercase" style={{ ...MONO, color: txtMuted }}>Qty</span>
+              <button onClick={() => { const v = Math.max(1, equityQty - 1); setEquityQty(v); setEquityQtyStr(String(v)); }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
+                style={{ background: btnBg, color: btnClr }}>−</button>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={equityQtyStr}
+                onChange={e => { const raw = e.target.value.replace(/[^0-9]/g, ""); setEquityQtyStr(raw); const n = parseInt(raw, 10); if (!isNaN(n) && n >= 1) setEquityQty(n); }}
+                onFocus={e => e.target.select()}
+                onBlur={() => { const n = parseInt(equityQtyStr, 10); const safe = isNaN(n) || n < 1 ? 1 : n; setEquityQty(safe); setEquityQtyStr(String(safe)); }}
+                className="text-[14px] font-bold text-center rounded outline-none w-14 h-7"
+                style={{ ...MONO, color: txtPrimary, background: btnBg, border: `1px solid ${border}` }}
+              />
+              <button onClick={() => { const v = equityQty + 1; setEquityQty(v); setEquityQtyStr(String(v)); }}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
+                style={{ background: btnBg, color: btnClr }}>+</button>
+              <div className="ml-auto flex flex-col items-end gap-0">
+                <span className="text-[9px] font-bold" style={{ ...MONO, color: txtPrimary }}>
+                  {equityQty} share{equityQty !== 1 ? "s" : ""}
+                </span>
+                {maxQty !== null && (
+                  <span className="text-[8px]" style={{ ...MONO, color: "#f59e0b" }}>
+                    {isIntraday5x ? `5x margin · max ${maxQty}` : `max ${maxQty}`}
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="text-[9px] uppercase" style={{ ...MONO, color: txtMuted }}>Lots</span>
+              <button onClick={() => setOL(v => Math.max(1, v - 1))}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
+                style={{ background: btnBg, color: btnClr }}>−</button>
+              <span className="text-[14px] font-bold w-6 text-center" style={{ ...MONO, color: txtPrimary }}>
+                {orderLots}
+              </span>
+              <button onClick={() => setOL(v => v + 1)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
+                style={{ background: btnBg, color: btnClr }}>+</button>
+              <span className="text-[9px] ml-auto" style={{ ...MONO, color: txtMuted }}>
+                {orderLots} × {LOT_SIZE} = {orderLots * LOT_SIZE} qty
+              </span>
+            </>
+          )}
         </div>
 
         {/* Insufficient funds warning */}
-        {!canBuy && wallet !== null && (
+        {!canBuy && effectiveWallet !== null && (
           <div className="mx-4 mb-2 px-3 py-1.5 rounded-lg text-[9px] text-center font-bold"
             style={{ ...MONO, background: "#e11d4815", color: "#e11d48", border: "1px solid #e11d4830" }}>
-            Insufficient funds · Need ₹{(approxBuy - wallet).toLocaleString("en-IN", { maximumFractionDigits: 0 })} more
+            Insufficient funds · Need ₹{(approxBuy - effectiveWallet).toLocaleString("en-IN", { maximumFractionDigits: 0 })} more
           </div>
         )}
 

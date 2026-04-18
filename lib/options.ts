@@ -60,7 +60,7 @@ export interface WatchedOption {
   leg:OptionLeg; entryPrice:number; rr:RRLevels;
   addedAt:string; status:"ACTIVE"|"TARGET"|"SL"|"EXPIRED"|"TIME_PROFIT"|"TIME_EXIT";
   currentPnL:number; pnlPct:number;
-  expiry?:string;
+  expiry?:string; exchange?:string;
 }
 
 // ─── 9:26 AM Scanner ─────────────────────────────────────────────────────────

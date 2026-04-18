@@ -225,6 +225,7 @@ function OptionsPageInner() {
     sym: string;
     tradingsymbol?: string;
     index: string;
+    isEquity?: boolean;
   } | null>(null);
 
   // Restore all persisted state after mount (avoids SSR hydration mismatch)
@@ -276,13 +277,13 @@ function OptionsPageInner() {
     try {
       localStorage.setItem("kite_wlist_v2", JSON.stringify({ groups: wlistGroups, activeId: activeWlId }));
     } catch {}
-    // Sync to MongoDB — debounced 10s so chain-poll price updates don't spam writes
+    // Sync to MongoDB — debounced 2s
     if (!isDemoMode) {
       const t = setTimeout(() => {
         wlistGroups.forEach(g => {
           watchlistApi.saveGroup(g.id, g.name, g.items).catch(() => {});
         });
-      }, 10000);
+      }, 2000);
       return () => clearTimeout(t);
     }
   }, [wlistGroups, activeWlId, hydrated]);
@@ -768,7 +769,16 @@ function OptionsPageInner() {
   }
 
   function removeWatch(token: number) {
-    setWatchlist((prev) => prev.filter((w) => w.leg.token !== token));
+    setWlistGroups(prev => {
+      const updated = prev.map(g =>
+        g.id === activeWlId ? { ...g, items: g.items.filter(w => w.leg.token !== token) } : g
+      );
+      if (!isDemoMode) {
+        const g = updated.find(gr => gr.id === activeWlId);
+        if (g) watchlistApi.saveGroup(g.id, g.name, g.items).catch(() => {});
+      }
+      return updated;
+    });
     setCandles3m((prev) => {
       const n = { ...prev };
       delete n[token];
@@ -1238,6 +1248,7 @@ function OptionsPageInner() {
               sym={chartTarget.sym}
               tradingsymbol={chartTarget.tradingsymbol}
               index={chartTarget.index}
+              isEquity={chartTarget.isEquity}
               onClose={() => setChartTarget(null)}
             />
           )}
@@ -2013,9 +2024,34 @@ function OptionsPageInner() {
                         // Find the matching OptionLeg from chain data
                         const row = data?.rows.find(r => r.ce.token === result.token || r.pe.token === result.token);
                         const leg = row ? (row.ce.token === result.token ? row.ce : row.pe) : null;
-                        if (leg) addToWatch(leg);
+                        if (leg) {
+                          // Auto-create "FNO" watchlist group if it doesn't exist
+                          const FNO_ID = "wl_fno";
+                          setWlistGroups(prev => {
+                            const exists = prev.find(g => g.id === FNO_ID);
+                            const rr = calcRR(leg.ltp, data?.atmIV ?? 15);
+                            const newItem: WatchedOption = {
+                              leg, entryPrice: leg.ltp, rr,
+                              addedAt: new Date().toLocaleTimeString("en-IN", { hour12: false }),
+                              status: "ACTIVE", currentPnL: 0, pnlPct: 0, expiry,
+                            };
+                            if (exists) {
+                              if (exists.items.find(w => w.leg.token === leg.token)) return prev;
+                              return prev.map(g => g.id === FNO_ID ? { ...g, items: [newItem, ...g.items] } : g);
+                            }
+                            // Insert FNO as 2nd tab (right after wl_default)
+                            const next = [...prev];
+                            const defaultIdx = next.findIndex(g => g.id === "wl_default");
+                            next.splice(defaultIdx >= 0 ? defaultIdx + 1 : 1, 0, { id: FNO_ID, name: "FNO", items: [newItem] });
+                            return next;
+                          });
+                          setActiveWlId(FNO_ID);
+                          setActiveTab("watchlist");
+                          fetchCandles3m(leg.token);
+                        }
                       } else {
-                        // Equity stock — create a synthetic WatchedOption
+                        // Equity stock — add to current tab (redirect to wl_default only if in FNO tab)
+                        const targetId = activeWlId === "wl_fno" ? "wl_default" : activeWlId;
                         const syntheticLeg: OptionLeg = {
                           token: result.token, strike: 0, type: "CE",
                           tradingsymbol: result.tradingsymbol,
@@ -2025,12 +2061,17 @@ function OptionsPageInner() {
                           bid: 0, ask: 0, oiVolRatio: 0, moveScore: 0,
                         };
                         const rr = calcRR(result.ltp || 1, data?.atmIV ?? 15);
-                        setWatchlist(prev => [{
+                        const newItem: WatchedOption = {
                           leg: syntheticLeg, entryPrice: result.ltp || 0, rr,
                           addedAt: new Date().toLocaleTimeString("en-IN", { hour12: false }),
                           status: "ACTIVE", currentPnL: 0, pnlPct: 0,
-                          expiry: "",
-                        }, ...prev]);
+                          expiry: "", exchange: result.exchange,
+                        };
+                        setWlistGroups(prev => prev.map(g =>
+                          g.id === targetId ? { ...g, items: [newItem, ...g.items] } : g
+                        ));
+                        setActiveWlId(targetId);
+                        setActiveTab("watchlist");
                       }
                     }}
                     onRemove={removeWatch}
@@ -2051,10 +2092,15 @@ function OptionsPageInner() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 pb-4">
-                      {watchlist.map((w) => {
+                      {[...watchlist].sort((a, b) => {
+                        const aIsEq = !a.expiry || a.leg.strike === 0 || !/\d/.test(a.leg.tradingsymbol ?? "");
+                        const bIsEq = !b.expiry || b.leg.strike === 0 || !/\d/.test(b.leg.tradingsymbol ?? "");
+                        return aIsEq === bIsEq ? 0 : aIsEq ? 1 : -1;
+                      }).map((w) => {
                         const wExpiry = w.expiry ?? expiry;
                         const sym = w.leg.tradingsymbol ?? "";
                         const wIndex: "NIFTY" | "SENSEX" = sym.startsWith("SENSEX") || sym.startsWith("BSX") ? "SENSEX" : "NIFTY";
+                        const wIsEquity = !wExpiry || w.leg.strike === 0 || !/\d/.test(sym);
                         return (
                           <WatchlistRow
                             key={w.leg.token}
@@ -2063,7 +2109,7 @@ function OptionsPageInner() {
                             expiry={wExpiry}
                             onRemove={() => removeWatch(w.leg.token)}
                             onOpenChart={(token, strike, type) =>
-                              setChartTarget({ token, strike, type, expiry: wExpiry, sym: "", index: wIndex })
+                              setChartTarget({ token, strike, type, expiry: wExpiry, sym, tradingsymbol: sym, index: wIndex, isEquity: wIsEquity })
                             }
                           />
                         );
@@ -5859,7 +5905,7 @@ function WatchlistRow({
               {sym}
             </span>
             <span className="text-[8px] px-1 py-0.5 rounded font-bold flex-shrink-0"
-              style={{ background: "#f1f5f9", color: "#64748b" }}>NSE</span>
+              style={{ background: "#f1f5f9", color: "#64748b" }}>{watched.exchange || "NSE"}</span>
           </div>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
@@ -5870,6 +5916,13 @@ function WatchlistRow({
             </span>
           </div>
         </div>
+
+        {/* Chart button */}
+        <button onClick={() => onOpenChart(leg.token, leg.strike, leg.type)}
+          className="w-7 h-7 flex items-center justify-center rounded-full cursor-pointer transition-opacity hover:opacity-80 flex-shrink-0"
+          style={{ background: "#16a34a20", color: "#16a34a" }}>
+          <IconChartCandle size={13} />
+        </button>
 
         {/* Remove */}
         <button onClick={onRemove}

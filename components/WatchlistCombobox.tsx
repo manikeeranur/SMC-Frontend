@@ -100,12 +100,16 @@ export default function WatchlistCombobox({
   const q = query.trim().toUpperCase();
   const chainSuggestions: SearchResult[] = [];
   if (chainRows.length) {
-    chainRows.forEach(row => {
+    const mid = Math.floor(chainRows.length / 2);
+    const queryMatchesChain = !q || chainIndex.includes(q);
+    chainRows.forEach((row, idx) => {
       [row.ce, row.pe].forEach((leg: OptionLeg) => {
         const strikeStr = `${row.strike}`;
         const combined = `${chainIndex}${strikeStr}`;
+        const isNearATM = Math.abs(idx - mid) <= 2;
         const match =
           !q ||
+          (isNearATM && queryMatchesChain) ||   // ATM only when query matches this chain
           strikeStr.includes(q) ||
           leg.type.includes(q) ||
           (q === "CALL" && leg.type === "CE") ||
@@ -127,10 +131,8 @@ export default function WatchlistCombobox({
       });
     });
   }
-  // When no query: exclude already-watched tokens from default suggestions
-  const visibleChainAll = q
-    ? chainSuggestions
-    : chainSuggestions.filter(r => !watchedTokens.has(r.token));
+  // Always exclude already-watched tokens so user doesn't see duplicates
+  const visibleChainAll = chainSuggestions.filter(r => !watchedTokens.has(r.token));
   const filteredChain = showAllChain ? visibleChainAll : visibleChainAll.slice(0, INITIAL_SHOW);
   const chainHasMore = visibleChainAll.length > INITIAL_SHOW && !showAllChain;
 
@@ -288,7 +290,7 @@ export default function WatchlistCombobox({
                 {visibleChainAll.length > 0 && <div style={{ height: 1, background: "#e2e8f0" }} />}
                 <div className="px-3 py-1.5 text-[8px] font-bold uppercase tracking-[1.5px]"
                   style={{ ...MONO, color: "#94a3b8", borderBottom: "1px solid #f8fafc" }}>
-                  NSE Stocks
+                  Stocks
                 </div>
                 {loading && (
                   <div className="flex items-center gap-2 px-3 py-4 text-[11px]" style={{ ...MONO, color: "#94a3b8" }}>
@@ -304,7 +306,7 @@ export default function WatchlistCombobox({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
                         <span className="font-bold text-[11px]" style={{ ...MONO, color: "#1e293b" }}>{r.tradingsymbol}</span>
-                        <span className="text-[8px] px-1 py-0.5 rounded font-bold" style={{ background: "#f1f5f9", color: "#64748b" }}>NSE</span>
+                        <span className="text-[8px] px-1 py-0.5 rounded font-bold" style={{ background: "#f1f5f9", color: "#64748b" }}>{r.exchange}</span>
                       </div>
                       <div className="text-[9px] truncate" style={{ ...MONO, color: "#64748b" }}>{r.name}</div>
                       {r.ltp > 0 && (

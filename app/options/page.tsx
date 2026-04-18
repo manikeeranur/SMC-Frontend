@@ -53,6 +53,7 @@ import { ResultsContent } from "@/components/ResultsContent";
 import { AccountTab } from "@/components/AccountTab";
 import TradingChartModal from "@/components/TradingChartModal";
 import WatchlistCombobox, { type SearchResult } from "@/components/WatchlistCombobox";
+import IndexSwiper from "@/components/IndexSwiper";
 import {
   IconPower,
   IconCopy,
@@ -1963,6 +1964,12 @@ function OptionsPageInner() {
 
             return (
               <div className="h-full flex flex-col overflow-hidden">
+                
+                {/* ── Index swiper ── */}
+                <IndexSwiper onOpenChart={(token, tradingsymbol, exchange) =>
+                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true })
+                } />
+                
                 {/* ── Header: watchlist tabs + create + search ── */}
                 <div className="flex-shrink-0 px-3 pt-3 pb-2 flex flex-col gap-2"
                   style={{ borderBottom: "1px solid #e2e8f0" }}>

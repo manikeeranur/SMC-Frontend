@@ -70,6 +70,10 @@ export const optionsApi = {
     req<{ quotes: Record<string, { ltp: number; prevClose: number; ltpChange: number }> }>(
       `/api/options/quotes?instruments=${instruments.map(encodeURIComponent).join(",")}`
     ),
+  indexQuotes: () =>
+    req<{ indices: Array<{ key: string; ltp: number; prevClose: number; ltpChange: number }> }>(
+      `/api/options/index-quotes`
+    ),
 };
 
 export const searchApi = {

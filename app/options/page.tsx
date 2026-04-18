@@ -1212,6 +1212,59 @@ function OptionsPageInner() {
             <div className="h-full flex flex-col overflow-hidden">
               {/* ── Desktop column headers (md+) */}
               <div className="hidden md:block flex-shrink-0 border-b border-[#cbd5e1] bg-white">
+                {/* Desktop toolbar: Scalper/Strategy toggles + Index selector + stats */}
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[#f1f5f9]">
+                  <div className="flex items-center gap-3">
+                    {/* Scalper toggle */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-bold" style={{ ...MONO, color: "#475569" }}>Scalper</span>
+                      <button
+                        onClick={() => setScalerOn((v) => !v)}
+                        className="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0"
+                        style={{ background: scalperOn ? "#0284c7" : "#cbd5e1" }}
+                      >
+                        <span className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform"
+                          style={{ left: scalperOn ? "18px" : "2px" }} />
+                        {scalperOn && <span className="absolute inset-0 flex items-center justify-center text-[8px]">⚡</span>}
+                      </button>
+                    </div>
+                    {/* Strategy toggle */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-bold" style={{ ...MONO, color: "#475569" }}>Strategy</span>
+                      <button
+                        onClick={() => { setStrategyOn((v) => !v); setBasketLegs([]); setChainOrderPanel(null); }}
+                        className="relative w-8 h-[18px] rounded-full transition-colors flex-shrink-0"
+                        style={{ background: strategyOn ? "#16a34a" : "#cbd5e1" }}
+                      >
+                        <span className="absolute top-[2px] w-[14px] h-[14px] rounded-full bg-white shadow transition-transform"
+                          style={{ left: strategyOn ? "18px" : "2px" }} />
+                        {strategyOn && <span className="absolute inset-0 flex items-center justify-center text-[8px]">🛒</span>}
+                      </button>
+                    </div>
+                  </div>
+                  {/* Index selector: NIFTY / SENSEX */}
+                  <div className="flex items-center rounded-full overflow-hidden border text-[8px] font-black flex-shrink-0"
+                    style={{ borderColor: "#cbd5e1", ...MONO }}>
+                    {(["NIFTY", "SENSEX"] as const).map(idx => (
+                      <button key={idx} onClick={() => { setChainIndex(idx); setExpiry(""); }}
+                        className="px-2 py-0.5 transition-colors"
+                        style={{ background: chainIndex === idx ? "#0284c7" : "transparent", color: chainIndex === idx ? "#fff" : "#64748b" }}>
+                        {idx}
+                      </button>
+                    ))}
+                  </div>
+                  {/* PCR + ATM stats */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[7px] text-[#94a3b8] uppercase" style={MONO}>PCR</span>
+                      <span className={`text-[10px] font-bold ${pcrOI >= 1 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pcrOI.toFixed(2)}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[7px] text-[#94a3b8] uppercase" style={MONO}>ATM</span>
+                      <span className="text-[10px] font-bold text-[#0284c7]" style={MONO}>{atmStrike}</span>
+                    </div>
+                  </div>
+                </div>
                 <div className="chain-grid">
                   <div className="py-2.5 bg-[#e8f4ff] border-r border-[#cbd5e1]" />
                   <div
@@ -1510,7 +1563,7 @@ function OptionsPageInner() {
                   const textMuted   = isDark ? "#64748b" : "#94a3b8";
                   const approxColor = !canBuy ? "#e11d48" : (isDark ? "#94a3b8" : "#1e293b");
                   return (
-                    <div className="md:hidden flex-shrink-0 shadow-2xl z-20"
+                    <div className="flex-shrink-0 shadow-2xl z-20"
                       style={{ background: panelBg, borderTop: `1px solid ${panelBorder}` }}>
 
                       {/* Header: contract + close */}
@@ -1676,7 +1729,7 @@ function OptionsPageInner() {
                   const textMuted   = isDark ? "#64748b" : "#94a3b8";
                   const approxColor = !canExecute ? "#e11d48" : (isDark ? "#94a3b8" : "#1e293b");
                   return (
-                    <div className="md:hidden flex-shrink-0 shadow-2xl z-20"
+                    <div className="flex-shrink-0 shadow-2xl z-20"
                       style={{ background: panelBg, borderTop: `1px solid ${panelBorder}` }}>
 
                       {/* Legs list */}
@@ -2650,39 +2703,37 @@ function ChainRow({
 
           {/* CE LTP + chart icon */}
           <div className="px-2 py-2 text-right border-r border-[#e2e8f0] group">
-            <div className="flex items-center justify-end gap-1.5">
-              <button
-                onClick={() =>
-                  onOpenChart(
-                    ce.token,
-                    strike,
-                    "CE",
-                    tvSymbol(expiry, strike, "CE"),
-                    ce.tradingsymbol,
-                  )
-                }
-                title={`Chart ${strike} CE`}
-                className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#0284c7]/15 text-[#0284c7] cursor-pointer"
-              >
-                <CandleIcon color="#0284c7" />
+            {scalperOn ? (
+              <button onClick={() => onOrder(ce, "BUY")} className="flex flex-col items-end w-full">
+                <span className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</span>
+                <span className={`text-[9px] font-bold ${cePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{cePct >= 0 ? "+" : ""}{cePct.toFixed(2)}%</span>
               </button>
-              <div>
-                <div
-                  className={`text-[13px] font-bold tabular-nums leading-tight
-                ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`}
-                  style={MONO}
-                >
-                  ₹{ce.ltp.toFixed(2)}
+            ) : strategyOn ? (
+              <div className="flex items-center justify-end gap-1.5">
+                <div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</div>
+                  <div className={`text-[8px] ${cePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{cePct >= 0 ? "+" : ""}{cePct.toFixed(2)}%</div>
                 </div>
-                <div
-                  className={`text-[8px] ${ce.ltpChange >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`}
-                  style={MONO}
-                >
-                  {ce.ltpChange >= 0 ? "▲" : "▼"}
-                  {Math.abs(ce.ltpChange).toFixed(2)}
+                <div className="flex flex-col gap-0.5">
+                  <OrderBtn color="#e11d48" label="S" onClick={() => onOrder(ce, "SELL")} />
+                  <OrderBtn color="#16a34a" label="B" onClick={() => onOrder(ce, "BUY")} />
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="flex items-center justify-end gap-1.5">
+                <button
+                  onClick={() => onOpenChart(ce.token, strike, "CE", tvSymbol(expiry, strike, "CE"), ce.tradingsymbol)}
+                  title={`Chart ${strike} CE`}
+                  className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#0284c7]/15 text-[#0284c7] cursor-pointer"
+                >
+                  <CandleIcon color="#0284c7" />
+                </button>
+                <div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</div>
+                  <div className={`text-[8px] ${ce.ltpChange >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{ce.ltpChange >= 0 ? "▲" : "▼"}{Math.abs(ce.ltpChange).toFixed(2)}</div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* STRIKE */}
@@ -2709,39 +2760,37 @@ function ChainRow({
 
           {/* PE LTP + chart icon */}
           <div className="px-2 py-2 text-left border-l border-[#e2e8f0] group">
-            <div className="flex items-center gap-1.5">
-              <div>
-                <div
-                  className={`text-[13px] font-bold tabular-nums leading-tight
-                ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`}
-                  style={MONO}
-                >
-                  ₹{pe.ltp.toFixed(2)}
+            {scalperOn ? (
+              <button onClick={() => onOrder(pe, "BUY")} className="flex flex-col items-start w-full">
+                <span className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</span>
+                <span className={`text-[9px] font-bold ${pePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pePct >= 0 ? "+" : ""}{pePct.toFixed(2)}%</span>
+              </button>
+            ) : strategyOn ? (
+              <div className="flex items-center gap-1.5">
+                <div className="flex flex-col gap-0.5">
+                  <OrderBtn color="#16a34a" label="B" onClick={() => onOrder(pe, "BUY")} />
+                  <OrderBtn color="#e11d48" label="S" onClick={() => onOrder(pe, "SELL")} />
                 </div>
-                <div
-                  className={`text-[8px] ${pe.ltpChange >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`}
-                  style={MONO}
-                >
-                  {pe.ltpChange >= 0 ? "▲" : "▼"}
-                  {Math.abs(pe.ltpChange).toFixed(2)}
+                <div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</div>
+                  <div className={`text-[8px] ${pePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pePct >= 0 ? "+" : ""}{pePct.toFixed(2)}%</div>
                 </div>
               </div>
-              <button
-                onClick={() =>
-                  onOpenChart(
-                    pe.token,
-                    strike,
-                    "PE",
-                    tvSymbol(expiry, strike, "PE"),
-                    pe.tradingsymbol,
-                  )
-                }
-                title={`Chart ${strike} PE`}
-                className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#e11d48]/15 text-[#e11d48] cursor-pointer"
-              >
-                <CandleIcon color="#e11d48" />
-              </button>
-            </div>
+            ) : (
+              <div className="flex items-center gap-1.5">
+                <div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</div>
+                  <div className={`text-[8px] ${pe.ltpChange >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pe.ltpChange >= 0 ? "▲" : "▼"}{Math.abs(pe.ltpChange).toFixed(2)}</div>
+                </div>
+                <button
+                  onClick={() => onOpenChart(pe.token, strike, "PE", tvSymbol(expiry, strike, "PE"), pe.tradingsymbol)}
+                  title={`Chart ${strike} PE`}
+                  className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-[#e11d48]/15 text-[#e11d48] cursor-pointer"
+                >
+                  <CandleIcon color="#e11d48" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* PE OI */}

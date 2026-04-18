@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { ResultsContent } from "@/components/ResultsContent";
 import { AccountTab } from "@/components/AccountTab";
+import TradingChartModal from "@/components/TradingChartModal";
 import {
   IconPower,
   IconCopy,
@@ -199,6 +200,17 @@ function OptionsPageInner() {
   const [basketLegs, setBasketLegs] = useState<ChainOrder[]>([]);
   const [walletAvailable, setWalletAvailable] = useState<number | null>(null);
   const [orderState, setOrderState] = useState<{ loading: boolean; result: string | null }>({ loading: false, result: null });
+
+  // ── Trading chart modal ──────────────────────────────────────────────────────
+  const [chartTarget, setChartTarget] = useState<{
+    token: number;
+    strike: number;
+    type: "CE" | "PE";
+    expiry: string;
+    sym: string;
+    tradingsymbol?: string;
+    index: string;
+  } | null>(null);
 
   // Restore all persisted state after mount (avoids SSR hydration mismatch)
   useEffect(() => {
@@ -702,6 +714,7 @@ function OptionsPageInner() {
         status: "ACTIVE",
         currentPnL: 0,
         pnlPct: 0,
+        expiry,
       },
       ...prev,
     ]);
@@ -1167,7 +1180,22 @@ function OptionsPageInner() {
         </nav>
 
         {/* ══ CONTENT ══ */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden relative">
+
+          {/* ── Trading chart panel (replaces content when a chart icon is clicked) ── */}
+          {chartTarget && (
+            <TradingChartModal
+              token={chartTarget.token}
+              strike={chartTarget.strike}
+              type={chartTarget.type}
+              expiry={chartTarget.expiry}
+              sym={chartTarget.sym}
+              tradingsymbol={chartTarget.tradingsymbol}
+              index={chartTarget.index}
+              onClose={() => setChartTarget(null)}
+            />
+          )}
+
           {!data && (
             <div className="flex flex-col items-center justify-center h-full gap-3">
               <div className="w-6 h-6 border-2 border-[#0284c7]/30 border-t-[#00d4ff] rounded-full animate-spin" />
@@ -1445,11 +1473,8 @@ function OptionsPageInner() {
                           setOrderLots(1);
                         }
                       }}
-                      onOpenChart={(_token, strike, type, sym) => {
-                        const tv = sym || (chainIndex === "SENSEX"
-                          ? tvSymbolSensex(expiry, strike, type as "CE"|"PE")
-                          : tvSymbol(expiry, strike, type as "CE"|"PE"));
-                        window.open(`https://www.tradingview.com/chart/?symbol=${tv}`, "_blank");
+                      onOpenChart={(token, strike, type, sym, tradingsymbol) => {
+                        setChartTarget({ token, strike, type: type as "CE" | "PE", expiry, sym, tradingsymbol, index: chainIndex });
                       }}
                     />
                   </div>
@@ -1783,6 +1808,10 @@ function OptionsPageInner() {
               autoTradeEnabled={autoTradeEnabled}
               autoPositions={autoPositions}
               onToggleAutoTrade={toggleAutoTrade}
+              onOpenChart={(token, strike, type) =>
+                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", index: "NIFTY" })
+              }
+              chainRows={data?.rows ?? []}
             />
           )}
 
@@ -1800,16 +1829,24 @@ function OptionsPageInner() {
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 pb-4">
-                  {watchlist.map((w) => (
-                    <WatchlistRow
-                      key={w.leg.token}
-                      watched={w}
-                      candles3m={candles3m[w.leg.token] ?? []}
-                      expiry={expiry}
-                      onRemove={() => removeWatch(w.leg.token)}
-                    />
-                  ))}
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 pb-4">
+                  {watchlist.map((w) => {
+                    const wExpiry = w.expiry ?? expiry;
+                    const sym = w.leg.tradingsymbol ?? "";
+                    const wIndex: "NIFTY" | "SENSEX" = sym.startsWith("SENSEX") || sym.startsWith("BSX") ? "SENSEX" : "NIFTY";
+                    return (
+                      <WatchlistRow
+                        key={w.leg.token}
+                        watched={w}
+                        candles3m={candles3m[w.leg.token] ?? []}
+                        expiry={wExpiry}
+                        onRemove={() => removeWatch(w.leg.token)}
+                        onOpenChart={(token, strike, type) =>
+                          setChartTarget({ token, strike, type, expiry: wExpiry, sym: "", index: wIndex })
+                        }
+                      />
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -2364,6 +2401,7 @@ function ChainRow({
     strike: number,
     type: "CE" | "PE",
     sym: string,
+    tradingsymbol?: string,
   ) => void;
 }) {
   const { ce, pe, strike, isATM } = row;
@@ -2456,7 +2494,7 @@ function ChainRow({
                 </div>
                 <div className="flex items-center justify-between mt-0.5">
                   <span className="text-[8px]" style={{ ...MONO, color: "#94a3b8" }}>{fmtOI(ce.oi)}</span>
-                  <button onClick={() => onOpenChart(ce.token, strike, "CE", "")}
+                  <button onClick={() => onOpenChart(ce.token, strike, "CE", "", ce.tradingsymbol)}
                     className="w-5 h-5 rounded flex items-center justify-center"
                     style={{ background: "#e8f4ff", color: "#0284c7" }}>
                     <IconChartLine size={10} />
@@ -2542,7 +2580,7 @@ function ChainRow({
                   </button>
                 </div>
                 <div className="flex items-center justify-between mt-0.5">
-                  <button onClick={() => onOpenChart(pe.token, strike, "PE", "")}
+                  <button onClick={() => onOpenChart(pe.token, strike, "PE", "", pe.tradingsymbol)}
                     className="w-5 h-5 rounded flex items-center justify-center"
                     style={{ background: "#fff0f3", color: "#e11d48" }}>
                     <IconChartLine size={10} />
@@ -2620,6 +2658,7 @@ function ChainRow({
                     strike,
                     "CE",
                     tvSymbol(expiry, strike, "CE"),
+                    ce.tradingsymbol,
                   )
                 }
                 title={`Chart ${strike} CE`}
@@ -2694,6 +2733,7 @@ function ChainRow({
                     strike,
                     "PE",
                     tvSymbol(expiry, strike, "PE"),
+                    pe.tradingsymbol,
                   )
                 }
                 title={`Chart ${strike} PE`}
@@ -4139,6 +4179,8 @@ function SMCTableView({
   autoTradeEnabled,
   autoPositions,
   onToggleAutoTrade,
+  onOpenChart,
+  chainRows,
 }: {
   alerts: any[];
   winRate: number | null;
@@ -4164,10 +4206,17 @@ function SMCTableView({
   autoTradeEnabled: boolean;
   autoPositions: any[];
   onToggleAutoTrade: () => void;
+  onOpenChart: (token: number, strike: number, type: "CE" | "PE") => void;
+  chainRows: any[];
 }) {
   const [mode, setMode] = useState<"live" | "backtest">("live");
   const { theme } = useTheme();
   const isDark = theme === "dark";
+
+  const resolveToken = (strike: number, direction: string): number | undefined => {
+    const row = chainRows.find((r: any) => r.strike === strike);
+    return direction === "CE" ? row?.ce?.token : row?.pe?.token;
+  };
 
   // Which alerts to show in table
   const tableAlerts =
@@ -4786,16 +4835,12 @@ function SMCTableView({
                           T2{a.status === "TARGET" ? "✓" : "✗"}
                         </span>
                       </div>
-                      {a.expiry && a.strike && a.direction && (
+                      {a.strike && a.direction && (
                         <button
-                          onClick={() =>
-                            window.open(
-                              `https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(a.expiry, a.strike, a.direction)}`,
-                              "_blank",
-                            )
-                          }
-                          className="opacity-50 w-5 h-5 flex items-center justify-center"
-                          style={{ color: mdirClr }}
+                          onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE"); }}
+                          className="w-5 h-5 flex items-center justify-center cursor-pointer"
+                          style={{ color: mdirClr, opacity: 0.7 }}
+                          title="Open chart"
                         >
                           <CandleIcon color={mdirClr} />
                         </button>
@@ -5426,17 +5471,12 @@ function SMCTableView({
 
                       {/* Chart + watchlist */}
                       <div className="px-2 py-2.5 flex items-center justify-center gap-1 group">
-                        {a.expiry && a.strike && a.direction && (
+                        {a.strike && a.direction && (
                           <button
-                            onClick={() =>
-                              window.open(
-                                `https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(a.expiry, a.strike, a.direction)}`,
-                                "_blank",
-                              )
-                            }
-                            title="Open Sensibull chart"
-                            className="opacity-30 group-hover:opacity-100 transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded cursor-pointer"
-                            style={{ color: dirColor }}
+                            onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE"); }}
+                            title="Open chart"
+                            className="transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded cursor-pointer"
+                            style={{ color: dirColor, opacity: 0.7 }}
                           >
                             <CandleIcon color={dirColor} />
                           </button>
@@ -5545,151 +5585,73 @@ function WatchlistRow({
   candles3m: _candles3m,
   expiry,
   onRemove,
+  onOpenChart,
 }: {
   watched: WatchedOption;
   candles3m: any[];
   expiry: string;
   onRemove: () => void;
+  onOpenChart: (token: number, strike: number, type: "CE" | "PE") => void;
 }) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
-  const { leg, status, entryPrice, currentPnL, pnlPct, rr } = watched;
-  const isCE = leg.type === "CE";
-  const dirClr = isCE ? "#0284c7" : "#e11d48";
+  const { leg } = watched;
+  const isCE    = leg.type === "CE";
+  const dirClr  = isCE ? "#0284c7" : "#e11d48";
+  const ltp     = leg.ltp;
+  const change  = leg.ltpChange ?? 0;
+  const openRef = ltp - change;
+  const pct     = openRef !== 0 ? (change / Math.abs(openRef)) * 100 : 0;
+  const pctUp   = pct >= 0;
+  const pctClr  = pctUp ? "#16a34a" : "#e11d48";
 
-  const isWin = status === "TARGET" || status === "TIME_PROFIT";
-  const isLoss = status === "SL" || status === "TIME_EXIT";
-  const stClr = isWin
-    ? "#16a34a"
-    : isLoss
-      ? "#e11d48"
-      : status === "EXPIRED"
-        ? "#b45309"
-        : "#0284c7";
-  const pnlUp = currentPnL >= 0;
-  const pnlClr = isWin
-    ? "#16a34a"
-    : isLoss
-      ? "#e11d48"
-      : pnlUp
-        ? "#16a34a"
-        : "#e11d48";
-  const stIco =
-    status === "TARGET"
-      ? "🎯"
-      : status === "SL"
-        ? "🛑"
-        : status === "TIME_PROFIT" || status === "TIME_EXIT"
-          ? "⏱"
-          : "⏳";
-  const stLbl =
-    status === "TIME_PROFIT"
-      ? "60M WIN"
-      : status === "TIME_EXIT"
-        ? "75M EXIT"
-        : status;
-
-  const sl = rr?.sl ?? 0;
-  const t1 = rr?.target1 ?? 0;
-  const t2 = rr?.target2 ?? 0;
-  const ltp = leg.ltp;
-  const fill =
-    t2 - sl > 0
-      ? Math.min(Math.max(((ltp - sl) / (t2 - sl)) * 100, 0), 100)
-      : 50;
-  const t1Pct = t2 - sl > 0 ? Math.min(((t1 - sl) / (t2 - sl)) * 100, 100) : 67;
-  const t1Hit = ltp >= t1 || isWin;
-  const lotPnl = currentPnL * LOT_SIZE;
-  const lotAbs = Math.abs(lotPnl);
-  const lotStr =
-    (lotPnl >= 0 ? "+" : "−") +
-    "₹" +
-    (lotAbs >= 1000 ? `${(lotAbs / 1000).toFixed(1)}K` : lotAbs.toFixed(0));
+  // "TVSMOTOR" from tradingsymbol, "28 Apr" from expiry
+  const underlying = (leg.tradingsymbol ?? "").match(/^[A-Z&]+/)?.[0] ?? "NIFTY";
+  const isSensex = underlying === "SENSEX" || underlying === "BSX";
+  const logoSrc = isSensex ? "/sensex-logo.avif" : "/nifty-logo.png";
+  const MNAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const expDate = new Date(expiry + "T00:00:00Z");
+  const dateStr = `${expDate.getUTCDate()} ${MNAMES[expDate.getUTCMonth()]}`;
 
   return (
-    <div
-      className="rounded-xl overflow-hidden"
-      style={{
-        background: isDark ? "#0d1420" : "#fff",
-        border: `1px solid ${isWin ? "#22c55e33" : isLoss ? "#ef444433" : isDark ? "#1e2a3a" : "#e2e8f0"}`,
-        borderLeft: `3px solid ${isWin ? "#22c55e" : isLoss ? "#e11d48" : status === "ACTIVE" ? dirClr : "#334155"}`,
-      }}
-    >
-      {/* Top section */}
-      <div className="px-3 py-3 flex items-start justify-between gap-2">
-        <div className="flex items-start gap-2.5 flex-1 min-w-0">
-          <div
-            className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0"
-            style={{
-              background: `${dirClr}18`,
-              border: `1.5px solid ${dirClr}40`,
-            }}
-          >
-            <span
-              className="text-[7px] font-bold"
-              style={{ ...MONO, color: "#64748b" }}
-            >
-              NI
-            </span>
-            <span
-              className="text-[12px] font-bold"
-              style={{ ...BEBAS, color: dirClr }}
-            >
-              {leg.type}
-            </span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div
-              className="text-[15px] font-bold leading-tight"
-              style={{ ...BEBAS, color: isDark ? "#e2e8f0" : "#1e293b" }}
-            >
-              NIFTY {leg.strike} {isCE ? "Call" : "Put"}
-            </div>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span
-                className="text-[13px] font-bold tabular-nums"
-                style={{ ...MONO, color: dirClr }}
-              >
-                ₹{ltp.toFixed(2)}
-              </span>
-              {leg.ltpChange != null && (
-                <span
-                  className="text-[9px] font-bold"
-                  style={{
-                    ...MONO,
-                    color: (leg.ltpChange ?? 0) >= 0 ? "#16a34a" : "#e11d48",
-                  }}
-                >
-                  {(leg.ltpChange ?? 0) >= 0 ? "▲" : "▼"}
-                  {Math.abs(leg.ltpChange ?? 0).toFixed(2)}
-                </span>
-              )}
-            </div>
-          </div>
+    <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+      style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
+      {/* Index logo — same style as AccountTab IndexLogo */}
+      <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center"
+        style={{ border: `2px solid ${dirClr}`, background: "#111" }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={logoSrc} alt={isSensex ? "SENSEX" : "NIFTY 50"}
+          className="w-full h-full object-cover" />
+      </div>
+
+      {/* Symbol + price */}
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-bold truncate" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+          {underlying} {dateStr} ₹{leg.strike} {isCE ? "Call" : "Put"}
         </div>
-        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
-          <div className="flex gap-1">
-            <button
-              onClick={() =>
-                window.open(
-                  `https://web.sensibull.com/chart?tradingSymbol=${sensibullSym(expiry, leg.strike, leg.type)}`,
-                  "_blank",
-                )
-              }
-              className="w-5 h-5 flex items-center justify-center opacity-50 cursor-pointer"
-              style={{ color: dirClr }}
-            >
-              <CandleIcon color={dirClr} />
-            </button>
-            <button
-              onClick={onRemove}
-              className="w-5 h-5 flex items-center justify-center text-[#94a3b8] hover:text-[#e11d48] cursor-pointer"
-            >
-              <IconX size={13} />
-            </button>
-          </div>
+        <div className="flex items-center gap-1.5 mt-0.5">
+          <span className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+            ₹{ltp.toFixed(2)}
+          </span>
+          <span className="text-[10px] font-bold" style={{ ...MONO, color: pctClr }}>
+            {pctUp ? "▲" : "▼"}{Math.abs(pct).toFixed(2)}%
+          </span>
         </div>
       </div>
+
+      {/* Chart button */}
+      <button onClick={() => onOpenChart(leg.token, leg.strike, leg.type)}
+        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
+        style={{ background: "#0284c7" }}>
+        <IconChartCandle size={14} color="#fff" />
+      </button>
+
+      {/* Remove */}
+      <button onClick={onRemove}
+        className="w-6 h-6 flex items-center justify-center rounded-full cursor-pointer transition-colors hover:opacity-70"
+        style={{ background: isDark ? "#1e293b" : "#f1f5f9", color: "#94a3b8" }}>
+        <IconX size={11} />
+      </button>
     </div>
   );
 }

@@ -34,10 +34,12 @@ import {
   authApi,
   autoTradeApi,
   accountApi,
+  watchlistApi,
   createWS,
   isDemoMode,
   AuthError,
 } from "@/lib/api";
+
 import { LOT_SIZE } from "@/lib/constants";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import {
@@ -50,6 +52,7 @@ import {
 import { ResultsContent } from "@/components/ResultsContent";
 import { AccountTab } from "@/components/AccountTab";
 import TradingChartModal from "@/components/TradingChartModal";
+import WatchlistCombobox, { type SearchResult } from "@/components/WatchlistCombobox";
 import {
   IconPower,
   IconCopy,
@@ -63,6 +66,9 @@ import {
   IconChartLine,
   IconFileAnalytics,
   IconWallet,
+  IconPlus,
+  IconCheck,
+  IconTrash,
 } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
@@ -128,7 +134,16 @@ function OptionsPageInner() {
   const [activeTab, setActiveTab] = useState<
     "chain" | "smc" | "watchlist" | "ohlc" | "results" | "account"
   >("chain");
-  const [watchlist, setWatchlist] = useState<WatchedOption[]>([]);
+  type WlistGroup = { id: string; name: string; items: WatchedOption[] };
+  const [wlistGroups, setWlistGroups] = useState<WlistGroup[]>([{ id: "wl_default", name: "My Watchlist", items: [] }]);
+  const [activeWlId, setActiveWlId] = useState("wl_default");
+  const [showCreateWlist, setShowCreateWlist] = useState(false);
+  const [newWlistName, setNewWlistName] = useState("");
+  const watchlist = wlistGroups.find(g => g.id === activeWlId)?.items ?? [];
+  function setWatchlist(fn: ((prev: WatchedOption[]) => WatchedOption[]) | WatchedOption[]) {
+    const updater = typeof fn === "function" ? fn : (_: WatchedOption[]) => fn as WatchedOption[];
+    setWlistGroups(prev => prev.map(g => g.id === activeWlId ? { ...g, items: updater(g.items) } : g));
+  }
   const [smcAlerts, setSmcAlerts] = useState<any[]>([]);
   const [smcWinRate, setSmcWinRate] = useState<number | null>(null);
   const [smcStatus, setSmcStatus] = useState<{
@@ -219,10 +234,31 @@ function OptionsPageInner() {
       const u = localStorage.getItem("kite_user");
       if (u) setLiveUser(u);
     }
-    try {
-      const wl = localStorage.getItem("kite_watchlist");
-      if (wl) setWatchlist(JSON.parse(wl));
-    } catch {}
+    // Load watchlists: try MongoDB first, fallback to localStorage
+    (async () => {
+      try {
+        if (!isDemoMode) {
+          const { groups } = await watchlistApi.getGroups();
+          if (groups.length > 0) {
+            setWlistGroups(groups);
+            setActiveWlId(groups[0].id);
+            return;
+          }
+        }
+      } catch {}
+      // Fallback: localStorage
+      try {
+        const v2 = localStorage.getItem("kite_wlist_v2");
+        if (v2) {
+          const parsed = JSON.parse(v2);
+          setWlistGroups(parsed.groups ?? [{ id: "wl_default", name: "My Watchlist", items: [] }]);
+          setActiveWlId(parsed.activeId ?? "wl_default");
+        } else {
+          const old = localStorage.getItem("kite_watchlist");
+          if (old) setWlistGroups([{ id: "wl_default", name: "My Watchlist", items: JSON.parse(old) }]);
+        }
+      } catch {}
+    })();
     const savedTab = localStorage.getItem("kite_tab") as
       | "chain"
       | "smc"
@@ -236,10 +272,20 @@ function OptionsPageInner() {
 
   useEffect(() => {
     if (!hydrated) return;
+    // Always save to localStorage as fallback
     try {
-      localStorage.setItem("kite_watchlist", JSON.stringify(watchlist));
+      localStorage.setItem("kite_wlist_v2", JSON.stringify({ groups: wlistGroups, activeId: activeWlId }));
     } catch {}
-  }, [watchlist, hydrated]);
+    // Sync to MongoDB — debounced 10s so chain-poll price updates don't spam writes
+    if (!isDemoMode) {
+      const t = setTimeout(() => {
+        wlistGroups.forEach(g => {
+          watchlistApi.saveGroup(g.id, g.name, g.items).catch(() => {});
+        });
+      }, 10000);
+      return () => clearTimeout(t);
+    }
+  }, [wlistGroups, activeWlId, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1869,41 +1915,165 @@ function OptionsPageInner() {
           )}
 
           {/* ── WATCHLIST ── */}
-          {activeTab === "watchlist" && (
-            <div className="h-full overflow-y-auto px-3 py-3">
-              {watchlist.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-[60vh] gap-3">
-                  <div className="text-[40px] text-[#cbd5e1]">◈</div>
-                  <p
-                    className="text-[11px] text-[#64748b] text-center"
-                    style={MONO}
-                  >
-                    Watchlist empty · Use + button on chain or scanner
-                  </p>
+          {activeTab === "watchlist" && (() => {
+            const activeGroup = wlistGroups.find(g => g.id === activeWlId);
+
+            return (
+              <div className="h-full flex flex-col overflow-hidden">
+                {/* ── Header: watchlist tabs + create + search ── */}
+                <div className="flex-shrink-0 px-3 pt-3 pb-2 flex flex-col gap-2"
+                  style={{ borderBottom: "1px solid #e2e8f0" }}>
+                  {/* Row 1: watchlist tabs + create */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {wlistGroups.map(g => (
+                      <button key={g.id} onClick={() => setActiveWlId(g.id)}
+                        className="px-2.5 py-1 rounded-full text-[10px] font-bold transition-all flex items-center gap-1"
+                        style={{ ...MONO,
+                          background: activeWlId === g.id ? "#0284c7" : "#f1f5f9",
+                          color: activeWlId === g.id ? "#fff" : "#475569",
+                          border: `1px solid ${activeWlId === g.id ? "#0284c7" : "#e2e8f0"}` }}>
+                        {g.name}
+                        <span className="text-[8px] opacity-70">{g.items.length}</span>
+                      </button>
+                    ))}
+                    {/* Create new watchlist */}
+                    {!showCreateWlist ? (
+                      <button onClick={() => { setShowCreateWlist(true); setNewWlistName(""); }}
+                        className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 transition-colors"
+                        style={{ background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0" }}
+                        title="Create new watchlist">
+                        <IconPlus size={12} />
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          autoFocus
+                          value={newWlistName}
+                          onChange={e => setNewWlistName(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter" && newWlistName.trim()) {
+                              const id = `wl_${Date.now()}`;
+                              setWlistGroups(prev => [...prev, { id, name: newWlistName.trim(), items: [] }]);
+                              setActiveWlId(id);
+                              setShowCreateWlist(false);
+                              setNewWlistName("");
+                            }
+                            if (e.key === "Escape") { setShowCreateWlist(false); setNewWlistName(""); }
+                          }}
+                          placeholder="Watchlist name…"
+                          className="text-[10px] px-2 py-1 rounded-lg outline-none"
+                          style={{ ...MONO, border: "1px solid #0284c7", width: 130, color: "#1e293b" }}
+                        />
+                        <button
+                          onClick={() => {
+                            if (!newWlistName.trim()) return;
+                            const id = `wl_${Date.now()}`;
+                            setWlistGroups(prev => [...prev, { id, name: newWlistName.trim(), items: [] }]);
+                            setActiveWlId(id);
+                            setShowCreateWlist(false);
+                            setNewWlistName("");
+                          }}
+                          className="w-6 h-6 rounded-full flex items-center justify-center"
+                          style={{ background: "#16a34a", color: "#fff" }}>
+                          <IconCheck size={11} />
+                        </button>
+                        <button onClick={() => { setShowCreateWlist(false); setNewWlistName(""); }}
+                          className="w-6 h-6 rounded-full flex items-center justify-center"
+                          style={{ background: "#f1f5f9", color: "#94a3b8" }}>
+                          <IconX size={11} />
+                        </button>
+                      </div>
+                    )}
+                    {/* Delete current watchlist (not default) */}
+                    {activeWlId !== "wl_default" && !showCreateWlist && (
+                      <button
+                        onClick={() => {
+                          const idToDelete = activeWlId;
+                          setWlistGroups(prev => prev.filter(g => g.id !== idToDelete));
+                          setActiveWlId("wl_default");
+                          if (!isDemoMode) watchlistApi.deleteGroup(idToDelete).catch(() => {});
+                        }}
+                        className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ml-auto"
+                        style={{ background: "#fff0f3", color: "#e11d48", border: "1px solid #fecdd3" }}
+                        title="Delete this watchlist">
+                        <IconTrash size={11} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Row 2: Search & Add combobox */}
+                  <WatchlistCombobox
+                    chainRows={data?.rows ?? []}
+                    chainIndex={chainIndex}
+                    expiry={expiry}
+                    watchedTokens={watchlistTokens}
+                    isDemoMode={isDemoMode}
+                    onAdd={(result: SearchResult) => {
+                      if (result.isOption) {
+                        // Find the matching OptionLeg from chain data
+                        const row = data?.rows.find(r => r.ce.token === result.token || r.pe.token === result.token);
+                        const leg = row ? (row.ce.token === result.token ? row.ce : row.pe) : null;
+                        if (leg) addToWatch(leg);
+                      } else {
+                        // Equity stock — create a synthetic WatchedOption
+                        const syntheticLeg: OptionLeg = {
+                          token: result.token, strike: 0, type: "CE",
+                          tradingsymbol: result.tradingsymbol,
+                          ltp: result.ltp, prevLtp: result.ltp, ltpChange: 0,
+                          oi: 0, oiChange: 0, volume: 0, iv: 0,
+                          delta: 0, gamma: 0, theta: 0, vega: 0,
+                          bid: 0, ask: 0, oiVolRatio: 0, moveScore: 0,
+                        };
+                        const rr = calcRR(result.ltp || 1, data?.atmIV ?? 15);
+                        setWatchlist(prev => [{
+                          leg: syntheticLeg, entryPrice: result.ltp || 0, rr,
+                          addedAt: new Date().toLocaleTimeString("en-IN", { hour12: false }),
+                          status: "ACTIVE", currentPnL: 0, pnlPct: 0,
+                          expiry: "",
+                        }, ...prev]);
+                      }
+                    }}
+                    onRemove={removeWatch}
+                  />
                 </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 pb-4">
-                  {watchlist.map((w) => {
-                    const wExpiry = w.expiry ?? expiry;
-                    const sym = w.leg.tradingsymbol ?? "";
-                    const wIndex: "NIFTY" | "SENSEX" = sym.startsWith("SENSEX") || sym.startsWith("BSX") ? "SENSEX" : "NIFTY";
-                    return (
-                      <WatchlistRow
-                        key={w.leg.token}
-                        watched={w}
-                        candles3m={candles3m[w.leg.token] ?? []}
-                        expiry={wExpiry}
-                        onRemove={() => removeWatch(w.leg.token)}
-                        onOpenChart={(token, strike, type) =>
-                          setChartTarget({ token, strike, type, expiry: wExpiry, sym: "", index: wIndex })
-                        }
-                      />
-                    );
-                  })}
+
+                {/* ── Watchlist items ── */}
+                <div className="flex-1 overflow-y-auto px-3 py-3">
+                  {watchlist.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-[50vh] gap-3">
+                      <div className="text-[40px] text-[#cbd5e1]">◈</div>
+                      <p className="text-[11px] text-[#64748b] text-center" style={MONO}>
+                        {activeGroup?.name ?? "Watchlist"} is empty
+                      </p>
+                      <p className="text-[10px] text-[#94a3b8] text-center" style={MONO}>
+                        Search above or use + on chain rows
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 pb-4">
+                      {watchlist.map((w) => {
+                        const wExpiry = w.expiry ?? expiry;
+                        const sym = w.leg.tradingsymbol ?? "";
+                        const wIndex: "NIFTY" | "SENSEX" = sym.startsWith("SENSEX") || sym.startsWith("BSX") ? "SENSEX" : "NIFTY";
+                        return (
+                          <WatchlistRow
+                            key={w.leg.token}
+                            watched={w}
+                            candles3m={candles3m[w.leg.token] ?? []}
+                            expiry={wExpiry}
+                            onRemove={() => removeWatch(w.leg.token)}
+                            onOpenChart={(token, strike, type) =>
+                              setChartTarget({ token, strike, type, expiry: wExpiry, sym: "", index: wIndex })
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            );
+          })()}
 
           {/* ── OHLC CSV ── */}
           {activeTab === "ohlc" && (
@@ -5645,16 +5815,75 @@ function WatchlistRow({
   const { theme } = useTheme();
   const isDark = theme === "dark";
   const { leg } = watched;
+  const ltp    = leg.ltp;
+  const change = leg.ltpChange ?? 0;
+  const openRef = ltp - change;
+  const pct    = openRef !== 0 ? (change / Math.abs(openRef)) * 100 : 0;
+  const pctUp  = pct >= 0;
+  const pctClr = pctUp ? "#16a34a" : "#e11d48";
+  const [logoErr, setLogoErr] = useState(false);
+
+  // Detect equity stock: no expiry, strike=0, or tradingsymbol has no digits
+  const isEquity = !expiry || leg.strike === 0 || !/\d/.test(leg.tradingsymbol ?? "");
+
+  // ── Equity stock card ──────────────────────────────────────────────────────
+  if (isEquity) {
+    const sym = leg.tradingsymbol ?? "STOCK";
+    const letter = sym[0]?.toUpperCase() ?? "S";
+    const avatarColors = ["#0284c7","#16a34a","#7c3aed","#ea580c","#db2777","#0891b2","#b45309"];
+    const avatarColor = avatarColors[letter.charCodeAt(0) % avatarColors.length];
+
+    return (
+      <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
+        style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
+        {/* Stock logo / avatar */}
+        <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center"
+          style={{ border: "2px solid #e2e8f0", background: logoErr ? avatarColor : "#fff" }}>
+          {logoErr ? (
+            <span className="text-[13px] font-black text-white">{sym.slice(0, 2)}</span>
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`https://images.smallcase.com/smallplug-v2/200/${sym}.png`}
+              alt={sym}
+              onError={() => setLogoErr(true)}
+              className="w-full h-full object-contain p-1"
+            />
+          )}
+        </div>
+
+        {/* Name + price */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[12px] font-bold truncate" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+              {sym}
+            </span>
+            <span className="text-[8px] px-1 py-0.5 rounded font-bold flex-shrink-0"
+              style={{ background: "#f1f5f9", color: "#64748b" }}>NSE</span>
+          </div>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+              ₹{ltp.toFixed(2)}
+            </span>
+            <span className="text-[10px] font-bold" style={{ ...MONO, color: pctClr }}>
+              {pctUp ? "▲" : "▼"}{Math.abs(pct).toFixed(2)}%
+            </span>
+          </div>
+        </div>
+
+        {/* Remove */}
+        <button onClick={onRemove}
+          className="w-6 h-6 flex items-center justify-center rounded-full cursor-pointer transition-colors hover:opacity-70"
+          style={{ background: isDark ? "#1e293b" : "#f1f5f9", color: "#94a3b8" }}>
+          <IconX size={11} />
+        </button>
+      </div>
+    );
+  }
+
+  // ── Options card ───────────────────────────────────────────────────────────
   const isCE    = leg.type === "CE";
   const dirClr  = isCE ? "#0284c7" : "#e11d48";
-  const ltp     = leg.ltp;
-  const change  = leg.ltpChange ?? 0;
-  const openRef = ltp - change;
-  const pct     = openRef !== 0 ? (change / Math.abs(openRef)) * 100 : 0;
-  const pctUp   = pct >= 0;
-  const pctClr  = pctUp ? "#16a34a" : "#e11d48";
-
-  // "TVSMOTOR" from tradingsymbol, "28 Apr" from expiry
   const underlying = (leg.tradingsymbol ?? "").match(/^[A-Z&]+/)?.[0] ?? "NIFTY";
   const isSensex = underlying === "SENSEX" || underlying === "BSX";
   const logoSrc = isSensex ? "/sensex-logo.avif" : "/nifty-logo.png";
@@ -5665,12 +5894,11 @@ function WatchlistRow({
   return (
     <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
       style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
-      {/* Index logo — same style as AccountTab IndexLogo */}
+      {/* Index logo */}
       <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center"
         style={{ border: `2px solid ${dirClr}`, background: "#111" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={logoSrc} alt={isSensex ? "SENSEX" : "NIFTY 50"}
-          className="w-full h-full object-cover" />
+        <img src={logoSrc} alt={isSensex ? "SENSEX" : "NIFTY 50"} className="w-full h-full object-cover" />
       </div>
 
       {/* Symbol + price */}

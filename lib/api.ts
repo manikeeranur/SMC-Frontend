@@ -68,6 +68,13 @@ export const optionsApi = {
     req<any>(`/api/options/historical-scan?date=${date}&expiry=${expiry}`),
 };
 
+export const searchApi = {
+  instruments: (q: string) =>
+    req<{ results: Array<{ token: number; tradingsymbol: string; name: string; exchange: string; type: string; ltp: number }> }>(
+      `/api/options/search?q=${encodeURIComponent(q)}`
+    ),
+};
+
 export const analysisApi = {
   scan: (expiry: string, min = 200) =>
     req<any>(`/api/analysis/scan/${expiry}?min_premium=${min}`),
@@ -169,6 +176,16 @@ export const watchlistApi = {
   remove: (token: number) =>
     req(`/api/watchlist/${token}`, { method: "DELETE" }),
   clear: () => req("/api/watchlist", { method: "DELETE" }),
+  // Named watchlist groups (MongoDB-backed)
+  getGroups: () =>
+    req<{ groups: Array<{ id: string; name: string; items: any[] }> }>("/api/watchlist/groups"),
+  saveGroup: (id: string, name: string, items: any[]) =>
+    req<{ ok: boolean }>(`/api/watchlist/groups/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, items }),
+    }),
+  deleteGroup: (id: string) =>
+    req<{ ok: boolean }>(`/api/watchlist/groups/${id}`, { method: "DELETE" }),
 };
 
 export function createWS(onMessage: (msg: any) => void): WebSocket | null {

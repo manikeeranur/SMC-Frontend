@@ -654,13 +654,6 @@ export default function TradingChartModal({
       s.vol?.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
       const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
       s.rsi?.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
-      // Auto-scroll: keep current candle at ~80% from left so history scrolls left
-      if (replayPlayingRef.current) {
-        const WINDOW = 60;
-        const RIGHT  = 5;
-        const from   = Math.max(0, candles.length - WINDOW + RIGHT);
-        chartRef.current.timeScale().setVisibleLogicalRange({ from, to: from + WINDOW });
-      }
     } catch {}
   }
 

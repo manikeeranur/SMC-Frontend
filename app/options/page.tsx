@@ -130,7 +130,7 @@ function OptionsPageInner() {
   const [niftyExpiry, setNiftyExpiry] = useState("");
   const [data, setData] = useState<OptionsChainData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [strikeRange] = useState<5 | 10 | 15>(15);
+  const [strikeRange] = useState<5 | 10 | 15 | 30>(30);
   const [live, setLive] = useState(true);
   const [activeTab, setActiveTab] = useState<
     "chain" | "smc" | "watchlist" | "ohlc" | "results" | "account"
@@ -1064,7 +1064,7 @@ function OptionsPageInner() {
         <div className="flex items-center gap-1.5 md:gap-2.5 flex-shrink-0">
           {isDemoMode && <Pill label="DEMO" color="#ea580c" />}
 
-          <div className="hidden md:block">
+          <div className="hidden">
             <Select value={expiry} onValueChange={setExpiry}>
               <SelectTrigger
                 className="h-7 px-2 text-[10px] rounded-sm border w-[130px]"
@@ -1290,6 +1290,7 @@ function OptionsPageInner() {
               prevClose={chartTarget.prevClose}
               ltpChange={chartTarget.ltpChange}
               onClose={() => setChartTarget(null)}
+              onOpenChain={(idx) => { setChainIndex(idx); setExpiry(""); setActiveTab("chain"); setChartTarget(null); }}
             />
           )}
 
@@ -2214,7 +2215,7 @@ function OptionsPageInner() {
         }}
       >
         <button
-          onClick={() => setActiveTab("account")}
+          onClick={() => { setActiveTab("account"); setChartTarget(null); }}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "account" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2224,7 +2225,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => setActiveTab("chain")}
+          onClick={() => { setActiveTab("chain"); setChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "chain" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2234,7 +2235,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => setActiveTab("smc")}
+          onClick={() => { setActiveTab("smc"); setChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "smc" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2252,7 +2253,7 @@ function OptionsPageInner() {
           )}
         </button>
         <button
-          onClick={() => setActiveTab("watchlist")}
+          onClick={() => { setActiveTab("watchlist"); setChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "watchlist" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2274,7 +2275,7 @@ function OptionsPageInner() {
           )}
         </button>
         <button
-          onClick={() => setActiveTab("ohlc")}
+          onClick={() => { setActiveTab("ohlc"); setChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "ohlc" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2284,7 +2285,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => setActiveTab("results")}
+          onClick={() => { setActiveTab("results"); setChartTarget(null); }}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "results" ? "#ea580c" : "#94a3b8" }}
         >

@@ -8,7 +8,7 @@ import {
   AreaSeries,
   HistogramSeries,
 } from "lightweight-charts";
-import { IconX, IconChevronLeft, IconChartBar, IconCurrencyRupee } from "@tabler/icons-react";
+import { IconX, IconChevronLeft, IconChartBar, IconCurrencyRupee, IconLayoutGrid } from "@tabler/icons-react";
 import {
   Select,
   SelectContent,
@@ -61,6 +61,7 @@ export interface TradingChartModalProps {
   prevClose?: number;   // passed from IndexSwiper for simple view
   ltpChange?: number;   // passed from IndexSwiper for simple view
   onClose: () => void;
+  onOpenChain?: (chainIndex: "NIFTY" | "SENSEX") => void;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -210,7 +211,7 @@ const SIMPLE_PERIOD_DAYS: Record<string, number> = {
 
 export default function TradingChartModal({
   token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, isIndex = false,
-  prevClose, ltpChange, onClose,
+  prevClose, ltpChange, onClose, onOpenChain,
 }: TradingChartModalProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -1096,14 +1097,23 @@ export default function TradingChartModal({
         {simpleMode && (
           <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-3 pb-2" style={{ background: "transparent" }}>
 
-            {/* back button — own row */}
-            <div className="mb-1.5">
+            {/* back button row */}
+            <div className="mb-1.5 flex items-center gap-2">
               <button onClick={onClose}
                 className="flex items-center gap-1 px-2.5 py-1 rounded-lg cursor-pointer transition-all hover:opacity-90 active:scale-95"
                 style={{ background: isDark ? "#1e2a3a" : "#e2e8f0", color: txtPrimary, border: `1px solid ${border}` }}>
                 <IconChevronLeft size={13} />
                 <span className="text-[9px] font-bold" style={MONO}>Back</span>
               </button>
+              {isIndex && (sym === "NIFTY50" || sym === "SENSEX") && onOpenChain && (
+                <button
+                  onClick={() => onOpenChain(sym === "SENSEX" ? "SENSEX" : "NIFTY")}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg cursor-pointer transition-all hover:opacity-90 active:scale-95"
+                  style={{ background: isDark ? "#0c2a3fdd" : "#0284c7dd", color: "#fff", border: "1px solid #0284c760" }}>
+                  <IconLayoutGrid size={11} />
+                  <span className="text-[9px] font-bold" style={MONO}>Option Chain</span>
+                </button>
+              )}
             </div>
 
             {/* company label + badge */}

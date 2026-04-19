@@ -57,6 +57,7 @@ export interface TradingChartModalProps {
   tradingsymbol?: string;
   index?: string;        // "NIFTY" | "SENSEX"
   isEquity?: boolean;   // NSE equity stock (no strike/expiry)
+  isIndex?: boolean;    // Index chart — no Buy/Sell
   onClose: () => void;
 }
 
@@ -199,7 +200,7 @@ function computeBB(closes: number[], period = 20, mult = 2) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function TradingChartModal({
-  token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, onClose,
+  token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, isIndex = false, onClose,
 }: TradingChartModalProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -829,7 +830,7 @@ export default function TradingChartModal({
 
         {/* Equity: stock name label (same pill style as options) */}
         {isEquity && !loading && !error && (
-          <span className="flex items-center h-7 px-2.5 rounded text-[9px] font-black flex-shrink-0"
+          <span className="hidden lg:flex items-center h-7 px-2.5 rounded text-[9px] font-black flex-shrink-0"
             style={{ ...MONO, color: "#16a34a", background: "#16a34a15", border: "1px solid #16a34a40" }}>
             {chartLabel}
           </span>
@@ -845,6 +846,7 @@ export default function TradingChartModal({
                 {chartLabel}
               </span>
             )}
+            {!isIndex && (<>
             <button onClick={() => setTO(v => !v)}
               className="h-7 px-2.5 rounded text-[9px] font-black cursor-pointer transition-all"
               style={{ ...MONO, background: tradeOpen ? "#e11d48" : "#e11d4820", color: tradeOpen ? "#fff" : "#e11d48", border: "1px solid #e11d4840" }}>
@@ -855,6 +857,7 @@ export default function TradingChartModal({
               style={{ ...MONO, background: tradeOpen ? "#16a34a" : "#16a34a20", color: tradeOpen ? "#fff" : "#16a34a", border: "1px solid #16a34a40" }}>
               Buy
             </button>
+            </>)}
           </div>
         )}
 
@@ -958,15 +961,8 @@ export default function TradingChartModal({
         )}
 
         {/* Symbol badge + Buy/Sell toggles — bottom-left (small screens only) */}
-        {!loading && !error && (
+        {!loading && !error && !isIndex && (
           <div className="lg:hidden absolute left-2 z-20 flex flex-col gap-1 items-start" style={{ bottom: "100px" }}>
-            {/* Symbol badge — same pill style for both equity and options */}
-            <span className="text-[9px] font-black px-2 py-0.5 rounded"
-              style={{ ...MONO, color: isEquity ? "#16a34a" : isCE ? "#38bdf8" : "#f472b6",
-                background: isDark ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.75)",
-                backdropFilter: "blur(6px)", border: `1px solid ${isEquity ? "#16a34a40" : isCE ? "#38bdf840" : "#f472b640"}` }}>
-              {chartLabel}
-            </span>
             <div className="flex gap-1.5">
               <button onClick={() => setTO(v => !v)}
                 className="px-2.5 py-1 rounded text-[9px] font-black cursor-pointer transition-all"
@@ -1103,7 +1099,7 @@ export default function TradingChartModal({
       </div>
 
       {/* ══ FOOTER — shows for options always; equity only in intraday mode ══ */}
-      {tradeOpen && (
+      {tradeOpen && !isIndex && (
       <div className="flex-shrink-0" style={{ borderTop: `1px solid ${border}`, background: panelBg }}>
 
         {/* Equity mode toggle — Intraday / Equity */}

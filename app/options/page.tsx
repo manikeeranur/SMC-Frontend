@@ -227,6 +227,7 @@ function OptionsPageInner() {
     tradingsymbol?: string;
     index: string;
     isEquity?: boolean;
+    isIndex?: boolean;
   } | null>(null);
 
   // Restore all persisted state after mount (avoids SSR hydration mismatch)
@@ -1282,6 +1283,7 @@ function OptionsPageInner() {
               tradingsymbol={chartTarget.tradingsymbol}
               index={chartTarget.index}
               isEquity={chartTarget.isEquity}
+              isIndex={chartTarget.isIndex}
               onClose={() => setChartTarget(null)}
             />
           )}
@@ -1967,7 +1969,7 @@ function OptionsPageInner() {
                 
                 {/* ── Index swiper ── */}
                 <IndexSwiper onOpenChart={(token, tradingsymbol, exchange) =>
-                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true })
+                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true, isIndex: true })
                 } />
                 
                 {/* ── Header: watchlist tabs + create + search ── */}

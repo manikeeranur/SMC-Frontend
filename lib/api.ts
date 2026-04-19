@@ -45,9 +45,9 @@ export const optionsApi = {
     req<any>(
       `/api/options/candles?token=${token}&date=${date}&interval=${interval}`,
     ),
-  candleRange: (token: number, from: string, to: string, interval = "minute") =>
+  candleRange: (token: number, from: string, to: string, interval = "minute", skipIndicators = false) =>
     req<any>(
-      `/api/options/candles?token=${token}&from=${from}&to=${to}&interval=${interval}`,
+      `/api/options/candles?token=${token}&from=${from}&to=${to}&interval=${interval}${skipIndicators ? "&skipIndicators=true" : ""}`,
     ),
   openPrices: (date: string, tokens: string) =>
     req<{ prices: Record<string, number | null> }>(

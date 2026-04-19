@@ -432,35 +432,33 @@ export default function TradingChartModal({
       }));
 
     if (tfCfg.kiteInterval === "day") {
-      // Daily candles: equity gets 5 years, options get standard 90 days
       const fromDate = isEquity ? dateFromDaysAgo(1825) : dateFromDaysAgo(tfCfg.fromDays);
       fetchPromise = optionsApi
-        .candleRange(token, fromDate, today, "day")
+        .candleRange(token, fromDate, today, "day", true)
         .catch(() => ({ rows: [] }))
         .then(mapRows);
     } else if (tfCfg.kiteInterval === "minute") {
       if (isEquity) {
-        // 60 days initial load (fast, 1 Kite call); scroll left loads older chunks on demand
-        const fromDate = dateFromDaysAgo(60);
+        // 30 days initial (1 Kite call); scroll left loads older 60-day chunks on demand
+        const fromDate = dateFromDaysAgo(30);
         fetchedFromRef.current = fromDate;
         hasMoreRef.current     = true;
         fetchPromise = optionsApi
-          .candleRange(token, fromDate, today, "minute")
+          .candleRange(token, fromDate, today, "minute", true)
           .catch(() => ({ rows: [] }))
           .then(mapRows);
       } else {
-        // FNO options: expiry period only
         fetchPromise = optionsApi
-          .candleRange(token, getExpiryStart(expiry), today, "minute")
+          .candleRange(token, getExpiryStart(expiry), today, "minute", true)
           .catch(() => ({ rows: [] }))
           .then(mapRows);
       }
     } else {
-      // 60minute (1h, 4h): 60 days initial for equity; scroll-lazy loads up to 5 years
-      const fromDate = isEquity ? dateFromDaysAgo(60) : getExpiryStart(expiry);
+      // 60minute (1h, 4h): 30 days initial; scroll-lazy loads up to 5 years
+      const fromDate = isEquity ? dateFromDaysAgo(30) : getExpiryStart(expiry);
       if (isEquity) { fetchedFromRef.current = fromDate; hasMoreRef.current = true; }
       fetchPromise = optionsApi
-        .candleRange(token, fromDate, today, tfCfg.kiteInterval)
+        .candleRange(token, fromDate, today, tfCfg.kiteInterval, true)
         .catch(() => ({ rows: [] }))
         .then(mapRows);
     }
@@ -690,7 +688,7 @@ export default function TradingChartModal({
           const newFromStr = newFromD.toISOString().split("T")[0];
           const toStr      = toD.toISOString().split("T")[0];
 
-          const raw = await optionsApi.candleRange(token, newFromStr, toStr, tfCfg.kiteInterval).catch(() => ({ rows: [] }));
+          const raw = await optionsApi.candleRange(token, newFromStr, toStr, tfCfg.kiteInterval, true).catch(() => ({ rows: [] }));
           const newCandles = filterMarketHours(
             (raw.rows ?? []).map((r: any) => ({
               time: istToUnix(r.date), open: r.open, high: r.high,

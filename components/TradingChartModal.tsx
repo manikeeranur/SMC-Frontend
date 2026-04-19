@@ -8,7 +8,7 @@ import {
   AreaSeries,
   HistogramSeries,
 } from "lightweight-charts";
-import { IconX, IconChevronLeft } from "@tabler/icons-react";
+import { IconX, IconChevronLeft, IconChartBar, IconCurrencyRupee } from "@tabler/icons-react";
 import {
   Select,
   SelectContent,
@@ -58,6 +58,8 @@ export interface TradingChartModalProps {
   index?: string;        // "NIFTY" | "SENSEX"
   isEquity?: boolean;   // NSE equity stock (no strike/expiry)
   isIndex?: boolean;    // Index chart — no Buy/Sell
+  prevClose?: number;   // passed from IndexSwiper for simple view
+  ltpChange?: number;   // passed from IndexSwiper for simple view
   onClose: () => void;
 }
 
@@ -199,8 +201,16 @@ function computeBB(closes: number[], period = 20, mult = 2) {
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+const SIMPLE_PERIOD_TF: Record<string, TfLabel> = {
+  "1D": "1m", "1W": "1D", "1M": "1D", "3M": "1D", "6M": "1D", "1Y": "1D", "5Y": "1W",
+};
+const SIMPLE_PERIOD_DAYS: Record<string, number> = {
+  "1D": 1, "1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365, "5Y": 1825,
+};
+
 export default function TradingChartModal({
-  token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, isIndex = false, onClose,
+  token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, isIndex = false,
+  prevClose, ltpChange, onClose,
 }: TradingChartModalProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -222,7 +232,11 @@ export default function TradingChartModal({
 
   // ── UI state ────────────────────────────────────────────────────────────────
   const [tf, setTf]         = useState<TfLabel>("1m");
-  const [chartType, setCT]  = useState<ChartType>("candle");
+  const [chartType, setCT]  = useState<ChartType>("area");
+  const [simpleMode, setSimpleMode] = useState(true);
+  const [simplePeriod, setSimplePeriod] = useState("1D");
+  const [todayStats, setTodayStats] = useState<{ open: number; high: number; low: number } | null>(null);
+  const [derivedPrevClose, setDerivedPrevClose] = useState<number | null>(null);
   const [indicators, setInd]= useState<Set<Indicator>>(new Set<Indicator>());
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState<string | null>(null);
@@ -282,6 +296,68 @@ export default function TradingChartModal({
     document.addEventListener("mouseup",   onUp);
     return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
   }, []);
+
+  // Compute OHLC stats for simple view — always based on the last trading day in data
+  useEffect(() => {
+    if (loading || !rawRef.current.length) return;
+    const candles = rawRef.current;
+    // Use last candle's date as "today" — works correctly on weekends/holidays too
+    const lastTs  = candles[candles.length - 1].time;
+    const lastD   = new Date(lastTs * 1000);
+    const lastDayStart = Date.UTC(lastD.getUTCFullYear(), lastD.getUTCMonth(), lastD.getUTCDate()) / 1000;
+
+    const dayCandles  = candles.filter(c => c.time >= lastDayStart);
+    const prevCandles = candles.filter(c => c.time <  lastDayStart);
+
+    if (dayCandles.length > 0) {
+      setTodayStats({
+        open: dayCandles[0].open,
+        high: Math.max(...dayCandles.map(c => c.high)),
+        low:  Math.min(...dayCandles.map(c => c.low)),
+      });
+    }
+    // prevClose = last candle of the trading day BEFORE the last trading day
+    if (prevCandles.length > 0) setDerivedPrevClose(prevCandles[prevCandles.length - 1].close);
+  }, [loading]);
+
+  // Apply visible range after data loads when in simple mode
+  useEffect(() => {
+    if (loading || !chartRef.current || !simpleMode) return;
+    const ts = chartRef.current.timeScale();
+    const candles = rawRef.current;
+    if (!candles.length || !ts) return;
+    // Remove right padding so chart fills to last candle
+    try { ts.applyOptions({ rightOffset: 0 }); } catch {}
+    if (simplePeriod === "1D") {
+      // Start exactly at 9:15 AM of the last trading day (no previous day bleed)
+      const lastTs = candles[candles.length - 1].time;
+      const lastD  = new Date(lastTs * 1000);
+      const lastDayStart = Date.UTC(lastD.getUTCFullYear(), lastD.getUTCMonth(), lastD.getUTCDate()) / 1000;
+      const fi = candles.findIndex(c => c.time >= lastDayStart);
+      ts.setVisibleLogicalRange({ from: fi >= 0 ? fi : 0, to: candles.length - 1 });
+    } else {
+      const fromTime = Date.now() / 1000 - SIMPLE_PERIOD_DAYS[simplePeriod] * 86400;
+      const fi = candles.findIndex(c => c.time >= fromTime);
+      if (fi >= 0) ts.setVisibleLogicalRange({ from: fi, to: candles.length - 1 });
+      else ts.fitContent();
+    }
+  }, [loading, simplePeriod, simpleMode]);
+
+  // Disable grid + interaction in simple mode; restore in tech mode
+  useEffect(() => {
+    if (!chartRef.current) return;
+    const noInteract = { mouseWheel: false, pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false };
+    const noScale    = { mouseWheel: false, pinch: false, axisPressedMouseMove: false, axisDoubleClickReset: false };
+    chartRef.current.applyOptions({
+      grid: {
+        vertLines: { visible: !simpleMode },
+        horzLines: { visible: !simpleMode },
+      },
+      handleScroll: simpleMode ? noInteract : true,
+      handleScale:  simpleMode ? noScale    : true,
+    });
+    try { chartRef.current.timeScale().applyOptions({ shiftVisibleRangeOnNewBar: false, lockVisibleTimeRangeOnResize: simpleMode }); } catch {}
+  }, [simpleMode, loading]);
 
   // Clean up replay timer on unmount
   useEffect(() => () => { if (replayTimerRef.current) clearInterval(replayTimerRef.current); }, []);
@@ -406,8 +482,9 @@ export default function TradingChartModal({
         textColor:  chartText,
         fontFamily: "'Space Mono', monospace",
         fontSize:   10,
+        attributionLogo: false,
       },
-      grid: { vertLines: { color: chartGrid }, horzLines: { color: chartGrid } },
+      grid: { vertLines: { color: chartGrid, visible: !simpleMode }, horzLines: { color: chartGrid, visible: !simpleMode } },
       crosshair: { mode: 1 },
       localization: {
         // istToUnix encodes IST time as UTC, so read UTC fields directly — no offset needed
@@ -448,7 +525,9 @@ export default function TradingChartModal({
           return `${h12}:${mi} ${ap}`;
         },
       },
-      rightPriceScale: { borderColor: chartBdr, scaleMargins: { top: 0.06, bottom: 0.06 }, minimumWidth: 0 },
+      rightPriceScale: { borderColor: chartBdr, scaleMargins: { top: 0.06, bottom: simpleMode ? 0 : 0.06 }, minimumWidth: 0 },
+      handleScroll: simpleMode ? { mouseWheel: false, pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false } : true,
+      handleScale:  simpleMode ? { mouseWheel: false, pinch: false, axisPressedMouseMove: false, axisDoubleClickReset: false } : true,
       autoSize: true,
     } as any);
 
@@ -523,11 +602,20 @@ export default function TradingChartModal({
     const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
     s.rsi.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
 
-    // Default view: show last trading day's session (9:15–15:30); scroll left for history
-    if (tfCfg.kiteInterval === "minute" && candles.length > 0) {
-      const lastTime   = candles[candles.length - 1].time;
+    // Default view
+    if (simpleMode && candles.length > 0) {
+      // Simple mode: show exact last trading day from first candle, no gap
+      const lastTs = candles[candles.length - 1].time;
+      const lastD  = new Date(lastTs * 1000);
+      const lastDayStart = Date.UTC(lastD.getUTCFullYear(), lastD.getUTCMonth(), lastD.getUTCDate()) / 1000;
+      const fi = candles.findIndex(c => c.time >= lastDayStart);
+      try { chart.timeScale().applyOptions({ rightOffset: 0 }); } catch {}
+      chart.timeScale().setVisibleLogicalRange({ from: fi >= 0 ? fi : 0, to: candles.length - 1 });
+    } else if (tfCfg.kiteInterval === "minute" && candles.length > 0) {
+      // Tech chart: show last trading day session, allow scroll for history
+      const lastTime     = candles[candles.length - 1].time;
       const lastDayStart = Math.floor(lastTime / 86400) * 86400;
-      const firstIdx   = candles.findIndex(c => c.time >= lastDayStart);
+      const firstIdx     = candles.findIndex(c => c.time >= lastDayStart);
       chart.timeScale().setVisibleLogicalRange({
         from: firstIdx > 0 ? firstIdx - 1 : 0,
         to:   candles.length - 0.5,
@@ -642,6 +730,12 @@ export default function TradingChartModal({
         }
       } catch {}
     }
+  }
+
+  function handleSimplePeriod(p: string) {
+    const newTf = SIMPLE_PERIOD_TF[p] as TfLabel;
+    setSimplePeriod(p);
+    if (tf !== newTf) setTf(newTf);
   }
 
   // ── Zoom / Scroll ─────────────────────────────────────────────────────────
@@ -825,6 +919,20 @@ export default function TradingChartModal({
     }
   }
 
+  // ── Simple view computed ─────────────────────────────────────────────────
+  const currentPrice      = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
+  const effectivePrevClose = prevClose ?? derivedPrevClose;
+  const changeVal         = effectivePrevClose && effectivePrevClose > 0 ? currentPrice - effectivePrevClose : (ltpChange ?? 0);
+  const changeAbs         = Math.abs(changeVal);
+  const changePct         = effectivePrevClose && effectivePrevClose > 0 ? Math.abs(changeVal / effectivePrevClose * 100) : 0;
+  const simpleIsUp        = changeVal >= 0;
+  const simpleChgClr      = simpleIsUp ? "#16a34a" : "#e11d48";
+  const fmtPrice          = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // badge colour per chart type
+  const simpleBadgeBg  = isIndex ? (isDark ? "#1e3a5f" : "#dbeafe") : isEquity ? (isDark ? "#14532d" : "#dcfce7") : isCE ? (isDark ? "#0c2a3f" : "#e0f2fe") : (isDark ? "#3b0764" : "#fae8ff");
+  const simpleBadgeClr = isIndex ? (isDark ? "#60a5fa" : "#1d4ed8") : isEquity ? (isDark ? "#4ade80" : "#166534") : isCE ? (isDark ? "#38bdf8" : "#0284c7") : (isDark ? "#e879f9" : "#a21caf");
+  const simpleBadgeTxt = isIndex ? "INDEX" : isEquity ? "NSE" : type;
+
   // ── Computed for footer ───────────────────────────────────────────────────
   const liveOrLast   = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
   const isIntraday5x = isEquity && equityMode === "intraday";
@@ -845,11 +953,11 @@ export default function TradingChartModal({
   const approxClr    = !canBuy ? "#e11d48" : txtPrimary;
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  // Fills absolute inset-0 of parent — no overlay/modal
   return (
     <div className="absolute inset-0 flex flex-col overflow-hidden" style={{ background: panelBg, zIndex: 100 }}>
 
-      {/* ══ HEADER ══ */}
+      {/* ══ FULL MODE HEADER ══ */}
+      {!simpleMode && (
       <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 flex-wrap"
         style={{ borderBottom: `1px solid ${border}`, background: isDark ? "#0d1424" : "#f8fafc" }}>
 
@@ -978,12 +1086,78 @@ export default function TradingChartModal({
           <IconX size={13} />
         </button>
       </div>
+      )}
 
       {/* ══ CHART ══ */}
       <div className="flex-1 relative overflow-hidden">
 
-        {/* OHLC single line — top-left, appears on crosshair move */}
-        {!loading && !error && ohlc && (
+        {/* Simple mode — transparent info overlay */}
+        {simpleMode && (
+          <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-3 pb-2" style={{ background: "transparent" }}>
+
+            {/* back button — own row */}
+            <div className="mb-1.5">
+              <button onClick={onClose}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg cursor-pointer transition-all hover:opacity-90 active:scale-95"
+                style={{ background: isDark ? "#1e2a3a" : "#e2e8f0", color: txtPrimary, border: `1px solid ${border}` }}>
+                <IconChevronLeft size={13} />
+                <span className="text-[9px] font-bold" style={MONO}>Back</span>
+              </button>
+            </div>
+
+            {/* company label + badge */}
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className="text-[20px] font-black leading-tight truncate" style={{ ...MONO, color: txtPrimary }}>{chartLabel}</span>
+              <span className="text-[8px] font-bold px-2 py-0.5 rounded flex-shrink-0" style={{ ...MONO, background: simpleBadgeBg, color: simpleBadgeClr }}>{simpleBadgeTxt}</span>
+            </div>
+
+            {/* price + change */}
+            <div className="flex items-end gap-2">
+              <span className="text-[16px] font-black leading-none" style={{ ...MONO, color: txtPrimary }}>
+                {currentPrice > 0 ? fmtPrice(currentPrice) : "—"}
+              </span>
+              <span className="text-[11px] font-bold pb-0.5" style={{ ...MONO, color: simpleChgClr }}>
+                {simpleIsUp ? "▲" : "▼"} {changeAbs.toFixed(2)} ({simpleIsUp ? "+" : ""}{changePct.toFixed(2)}%)
+              </span>
+            </div>
+
+            {/* stats — compact single row */}
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {(isIndex || isEquity ? [
+                ["Open",       todayStats?.open  != null ? fmtPrice(todayStats.open)     : "—", txtPrimary],
+                ["Low",        todayStats?.low   != null ? fmtPrice(todayStats.low)      : "—", "#e11d48"],
+                ["High",       todayStats?.high  != null ? fmtPrice(todayStats.high)     : "—", "#16a34a"],
+                ["Prev Close", effectivePrevClose != null ? fmtPrice(effectivePrevClose) : "—", txtMuted],
+              ] : [
+                ["Strike",  strike > 0 ? strike.toLocaleString("en-IN") : "—",               simpleBadgeClr],
+                ["Low",     todayStats?.low  != null ? fmtPrice(todayStats.low)          : "—", "#e11d48"],
+                ["High",    todayStats?.high != null ? fmtPrice(todayStats.high)         : "—", "#16a34a"],
+                ["Expiry",  expiry || "—",                                                     txtMuted],
+              ] as [string, string, string][]).map(([label, val, clr], i) => (
+                <div key={label} className="flex items-center gap-1">
+                  {i > 0 && <span style={{ color: txtMuted, opacity: 0.3, fontSize: 8 }}>|</span>}
+                  <span className="text-[8px]" style={{ ...MONO, color: txtMuted }}>{label}</span>
+                  <span className="text-[9px] font-black" style={{ ...MONO, color: clr }}>{val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Simple mode — Tech Chart icon button only */}
+        {simpleMode && (
+          <div className="absolute z-20" style={{ bottom: 65, right: 65 }}>
+            <button onClick={() => { setCT("candle"); setTf("1m"); setSimpleMode(false); }}
+              title="Tech Chart"
+              className="w-9 h-9 flex items-center justify-center rounded-full cursor-pointer transition-all hover:scale-105 active:scale-95"
+              style={{ background: isDark ? "#1e3a5fdd" : "#2563ebdd", color: "#fff", boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>
+              <IconChartBar size={18} />
+            </button>
+          </div>
+        )}
+
+        {/* OHLC single line — top-left, appears on crosshair move (full mode only) */}
+        {!simpleMode && !loading && !error && ohlc && (
           <div className="absolute top-2 left-2 z-20 flex items-center gap-2 px-1.5 py-0.5 rounded text-[9px] font-bold"
             style={{ ...MONO, background: isDark ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.8)", backdropFilter: "blur(4px)" }}>
             <span style={{ color: txtMuted }}>O<span style={{ color: txtPrimary }}> {ohlc.o.toFixed(2)}</span></span>
@@ -993,8 +1167,8 @@ export default function TradingChartModal({
           </div>
         )}
 
-        {/* Symbol badge + Buy/Sell toggles — bottom-left (small screens only) */}
-        {!loading && !error && !isIndex && (
+        {/* Symbol badge + Buy/Sell toggles — bottom-left (small screens, tech chart only) */}
+        {!simpleMode && !loading && !error && !isIndex && (
           <div className="lg:hidden absolute left-2 z-20 flex flex-col gap-1 items-start" style={{ bottom: "100px" }}>
             <div className="flex gap-1.5">
               <button onClick={() => setTO(v => !v)}
@@ -1029,7 +1203,7 @@ export default function TradingChartModal({
           </div>
         )}
         {/* ── Replay pick-start overlay ── */}
-        {replayPicking && (
+        {!simpleMode && replayPicking && (
           <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
             <div className="px-4 py-2 rounded-lg text-[11px] font-bold text-center"
               style={{ ...MONO, background: "rgba(245,158,11,0.92)", color: "#000", boxShadow: "0 4px 20px rgba(0,0,0,0.4)" }}>
@@ -1039,7 +1213,7 @@ export default function TradingChartModal({
         )}
 
         {/* ── Chart nav + replay controls — bottom below buy/sell ── */}
-        {!loading && !error && (
+        {!simpleMode && !loading && !error && (
           <div className="absolute left-2 z-20 flex items-center gap-1 flex-wrap" style={{ bottom: "70px" }}>
             {/* Scroll left */}
             <button onClick={() => scrollChart(-15)} title="Scroll left"
@@ -1128,27 +1302,44 @@ export default function TradingChartModal({
           </div>
         )}
 
-        {/* RSI pane resize handle */}
-        {indicators.has("RSI") && !loading && !error && (
+        {/* RSI pane resize handle — tech chart only */}
+        {!simpleMode && indicators.has("RSI") && !loading && !error && (
           <div
-            className="absolute left-0 right-0 z-30 flex items-center justify-center group cursor-ns-resize select-none"
+            className="absolute left-0 right-0 z-30 flex items-center justify-center cursor-ns-resize select-none"
             style={{ bottom: rsiHeight - 3, height: 8 }}
             onMouseDown={(e) => {
               e.preventDefault();
               rsiDragRef.current = { startY: e.clientY, startH: rsiHeightRef.current };
             }}
           >
-            <div className="w-12 h-[3px] rounded-full transition-colors"
-              style={{ background: isDark ? "#334155" : "#cbd5e1" }} />
+            <div className="w-12 h-[3px] rounded-full" style={{ background: isDark ? "#334155" : "#cbd5e1" }} />
           </div>
         )}
 
         <div ref={chartDivRef} className="absolute inset-0" />
       </div>
 
-      {/* ══ FOOTER — shows for options always; equity only in intraday mode ══ */}
+      {/* ══ SIMPLE MODE — period buttons ══ */}
+      {simpleMode && (
+        <div className="flex-shrink-0 flex items-center gap-1 px-3 py-2"
+          style={{ borderTop: `1px solid ${border}`, background: isDark ? "#080b0f" : "#f1f5f9" }}>
+          {["1D","1W","1M","3M","6M","1Y","5Y"].map(p => (
+            <button key={p} onClick={() => handleSimplePeriod(p)}
+              className="flex-1 py-1 rounded text-[9px] font-black cursor-pointer transition-all active:scale-95"
+              style={{
+                ...MONO,
+                background: simplePeriod === p ? "#16a34a" : "transparent",
+                color: simplePeriod === p ? "#fff" : txtMuted,
+              }}>
+              {p}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ══ FOOTER — absolute overlay so chart never shrinks ══ */}
       {tradeOpen && !isIndex && (
-      <div className="flex-shrink-0" style={{ borderTop: `1px solid ${border}`, background: panelBg }}>
+      <div className="absolute bottom-0 left-0 right-0 z-30" style={{ borderTop: `1px solid ${border}`, background: panelBg }}>
 
         {/* Equity mode toggle — Intraday / Equity */}
         {isEquity && (

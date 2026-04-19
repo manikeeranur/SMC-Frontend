@@ -230,6 +230,8 @@ function OptionsPageInner() {
     index: string;
     isEquity?: boolean;
     isIndex?: boolean;
+    prevClose?: number;
+    ltpChange?: number;
   } | null>(null);
 
   // Restore all persisted state after mount (avoids SSR hydration mismatch)
@@ -1285,6 +1287,8 @@ function OptionsPageInner() {
               index={chartTarget.index}
               isEquity={chartTarget.isEquity}
               isIndex={chartTarget.isIndex}
+              prevClose={chartTarget.prevClose}
+              ltpChange={chartTarget.ltpChange}
               onClose={() => setChartTarget(null)}
             />
           )}
@@ -1969,8 +1973,8 @@ function OptionsPageInner() {
               <div className="h-full flex flex-col overflow-hidden">
                 
                 {/* ── Index swiper ── */}
-                <IndexSwiper onOpenChart={(token, tradingsymbol, exchange) =>
-                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true, isIndex: true })
+                <IndexSwiper onOpenChart={(token, tradingsymbol, exchange, prevClose, ltpChange) =>
+                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true, isIndex: true, prevClose, ltpChange })
                 } />
                 
                 {/* ── Header: watchlist tabs + create + search ── */}
@@ -2304,7 +2308,7 @@ function OptionsPageInner() {
       />
       {/* Panel */}
       <div
-        className="fixed inset-y-0 left-0 z-50 flex flex-col md:hidden shadow-2xl transition-transform duration-300 ease-out"
+        className="fixed inset-y-0 left-0 z-[100] flex flex-col md:hidden shadow-2xl transition-transform duration-300 ease-out"
         style={{
           width: "75vw",
           maxWidth: "320px",

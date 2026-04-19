@@ -72,6 +72,8 @@ interface Props {
     token: number,
     tradingsymbol: string,
     exchange: "NSE" | "BSE",
+    prevClose: number,
+    ltpChange: number,
   ) => void;
 }
 
@@ -123,6 +125,8 @@ export default function IndexSwiper({ onOpenChart }: Props) {
                     meta.token,
                     meta.label.replace(/\s+/g, ""),
                     meta.exchange,
+                    idx.prevClose,
+                    idx.ltpChange,
                   )
                 }
                 className="flex flex-col gap-0.5 px-3 py-2 rounded-xl cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"

@@ -138,6 +138,8 @@ function OptionsPageInner() {
   type WlistGroup = { id: string; name: string; items: WatchedOption[] };
   const [wlistGroups, setWlistGroups] = useState<WlistGroup[]>([{ id: "wl_default", name: "My Watchlist", items: [] }]);
   const [activeWlId, setActiveWlId] = useState("wl_default");
+  const [wlDragToken, setWlDragToken]     = useState<number | null>(null);
+  const [wlDragOverToken, setWlDragOverToken] = useState<number | null>(null);
   const [showCreateWlist, setShowCreateWlist] = useState(false);
   const [newWlistName, setNewWlistName] = useState("");
   const watchlist = wlistGroups.find(g => g.id === activeWlId)?.items ?? [];
@@ -237,28 +239,27 @@ function OptionsPageInner() {
       const u = localStorage.getItem("kite_user");
       if (u) setLiveUser(u);
     }
-    // Load watchlists: try MongoDB first, fallback to localStorage
+    // Load watchlists: localStorage first (always up-to-date), then sync MongoDB in background
+    try {
+      const v2 = localStorage.getItem("kite_wlist_v2");
+      if (v2) {
+        const parsed = JSON.parse(v2);
+        setWlistGroups(parsed.groups ?? [{ id: "wl_default", name: "My Watchlist", items: [] }]);
+        setActiveWlId(parsed.activeId ?? "wl_default");
+      } else {
+        const old = localStorage.getItem("kite_watchlist");
+        if (old) setWlistGroups([{ id: "wl_default", name: "My Watchlist", items: JSON.parse(old) }]);
+      }
+    } catch {}
+    // Background sync from MongoDB only if localStorage was empty
     (async () => {
       try {
-        if (!isDemoMode) {
+        if (!isDemoMode && !localStorage.getItem("kite_wlist_v2")) {
           const { groups } = await watchlistApi.getGroups();
           if (groups.length > 0) {
             setWlistGroups(groups);
             setActiveWlId(groups[0].id);
-            return;
           }
-        }
-      } catch {}
-      // Fallback: localStorage
-      try {
-        const v2 = localStorage.getItem("kite_wlist_v2");
-        if (v2) {
-          const parsed = JSON.parse(v2);
-          setWlistGroups(parsed.groups ?? [{ id: "wl_default", name: "My Watchlist", items: [] }]);
-          setActiveWlId(parsed.activeId ?? "wl_default");
-        } else {
-          const old = localStorage.getItem("kite_watchlist");
-          if (old) setWlistGroups([{ id: "wl_default", name: "My Watchlist", items: JSON.parse(old) }]);
         }
       } catch {}
     })();
@@ -2133,11 +2134,7 @@ function OptionsPageInner() {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 lg:grid-cols-4 gap-2 pb-4">
-                      {[...watchlist].sort((a, b) => {
-                        const aIsEq = !a.expiry || a.leg.strike === 0 || !/\d/.test(a.leg.tradingsymbol ?? "");
-                        const bIsEq = !b.expiry || b.leg.strike === 0 || !/\d/.test(b.leg.tradingsymbol ?? "");
-                        return aIsEq === bIsEq ? 0 : aIsEq ? 1 : -1;
-                      }).map((w) => {
+                      {watchlist.map((w) => {
                         const wExpiry = w.expiry ?? expiry;
                         const sym = w.leg.tradingsymbol ?? "";
                         const wIndex: "NIFTY" | "SENSEX" = sym.startsWith("SENSEX") || sym.startsWith("BSX") ? "SENSEX" : "NIFTY";
@@ -2148,10 +2145,28 @@ function OptionsPageInner() {
                             watched={w}
                             candles3m={candles3m[w.leg.token] ?? []}
                             expiry={wExpiry}
+                            isDragOver={wlDragOverToken === w.leg.token}
                             onRemove={() => removeWatch(w.leg.token)}
                             onOpenChart={(token, strike, type) =>
                               setChartTarget({ token, strike, type, expiry: wExpiry, sym, tradingsymbol: sym, index: wIndex, isEquity: wIsEquity })
                             }
+                            onDragStart={() => setWlDragToken(w.leg.token)}
+                            onDragOver={(e) => { e.preventDefault(); setWlDragOverToken(w.leg.token); }}
+                            onDrop={() => {
+                              if (wlDragToken == null || wlDragToken === w.leg.token) return;
+                              setWlistGroups(prev => prev.map(g => {
+                                if (g.id !== activeWlId) return g;
+                                const items = [...g.items];
+                                const from = items.findIndex(i => i.leg.token === wlDragToken);
+                                const to   = items.findIndex(i => i.leg.token === w.leg.token);
+                                if (from < 0 || to < 0) return g;
+                                const [moved] = items.splice(from, 1);
+                                items.splice(to, 0, moved);
+                                return { ...g, items };
+                              }));
+                              setWlDragToken(null); setWlDragOverToken(null);
+                            }}
+                            onDragEnd={() => { setWlDragToken(null); setWlDragOverToken(null); }}
                           />
                         );
                       })}
@@ -5892,12 +5907,22 @@ function WatchlistRow({
   expiry,
   onRemove,
   onOpenChart,
+  isDragOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: {
   watched: WatchedOption;
   candles3m: any[];
   expiry: string;
   onRemove: () => void;
   onOpenChart: (token: number, strike: number, type: "CE" | "PE") => void;
+  isDragOver?: boolean;
+  onDragStart?: () => void;
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: () => void;
+  onDragEnd?: () => void;
 }) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -5921,8 +5946,18 @@ function WatchlistRow({
     const avatarColor = avatarColors[letter.charCodeAt(0) % avatarColors.length];
 
     return (
-      <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-        style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
+      <div
+        draggable
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        onDragEnd={onDragEnd}
+        onClick={() => onOpenChart(leg.token, leg.strike, leg.type)}
+        className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all hover:opacity-90 select-none"
+        style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDragOver ? "#0284c7" : isDark ? "#1e2a3a" : "#e2e8f0"}`, opacity: isDragOver ? 0.6 : 1 }}>
+        {/* Drag handle */}
+        <span className="text-[14px] flex-shrink-0 cursor-grab" style={{ color: "#94a3b8", lineHeight: 1 }}>⠿</span>
+
         {/* Stock logo / avatar */}
         <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center"
           style={{ border: "2px solid #e2e8f0", background: logoErr ? avatarColor : "#fff" }}>
@@ -5930,21 +5965,15 @@ function WatchlistRow({
             <span className="text-[13px] font-black text-white">{sym.slice(0, 2)}</span>
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`https://images.smallcase.com/smallplug-v2/200/${sym}.png`}
-              alt={sym}
-              onError={() => setLogoErr(true)}
-              className="w-full h-full object-contain p-1"
-            />
+            <img src={`https://images.smallcase.com/smallplug-v2/200/${sym}.png`} alt={sym}
+              onError={() => setLogoErr(true)} className="w-full h-full object-contain p-1" />
           )}
         </div>
 
         {/* Name + price */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[12px] font-bold truncate" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>
-              {sym}
-            </span>
+            <span className="text-[12px] font-bold truncate" style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b" }}>{sym}</span>
             <span className="text-[8px] px-1 py-0.5 rounded font-bold flex-shrink-0"
               style={{ background: "#f1f5f9", color: "#64748b" }}>{watched.exchange || "NSE"}</span>
           </div>
@@ -5958,16 +5987,9 @@ function WatchlistRow({
           </div>
         </div>
 
-        {/* Chart button */}
-        <button onClick={() => onOpenChart(leg.token, leg.strike, leg.type)}
-          className="w-7 h-7 flex items-center justify-center rounded-full cursor-pointer transition-opacity hover:opacity-80 flex-shrink-0"
-          style={{ background: "#16a34a20", color: "#16a34a" }}>
-          <IconChartCandle size={13} />
-        </button>
-
         {/* Remove */}
-        <button onClick={onRemove}
-          className="w-6 h-6 flex items-center justify-center rounded-full cursor-pointer transition-colors hover:opacity-70"
+        <button onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="w-6 h-6 flex items-center justify-center rounded-full cursor-pointer transition-colors hover:opacity-70 flex-shrink-0"
           style={{ background: isDark ? "#1e293b" : "#f1f5f9", color: "#94a3b8" }}>
           <IconX size={11} />
         </button>
@@ -5986,8 +6008,18 @@ function WatchlistRow({
   const dateStr = `${expDate.getUTCDate()} ${MNAMES[expDate.getUTCMonth()]}`;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-3 rounded-xl"
-      style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}>
+    <div
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      onClick={() => onOpenChart(leg.token, leg.strike, leg.type)}
+      className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all hover:opacity-90 select-none"
+      style={{ background: isDark ? "#0d1420" : "#fff", border: `1px solid ${isDragOver ? "#0284c7" : isDark ? "#1e2a3a" : "#e2e8f0"}`, opacity: isDragOver ? 0.6 : 1 }}>
+      {/* Drag handle */}
+      <span className="text-[14px] flex-shrink-0 cursor-grab" style={{ color: "#94a3b8", lineHeight: 1 }}>⠿</span>
+
       {/* Index logo */}
       <div className="w-11 h-11 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center"
         style={{ border: `2px solid ${dirClr}`, background: "#111" }}>
@@ -6010,16 +6042,9 @@ function WatchlistRow({
         </div>
       </div>
 
-      {/* Chart button */}
-      <button onClick={() => onOpenChart(leg.token, leg.strike, leg.type)}
-        className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
-        style={{ background: "#0284c7" }}>
-        <IconChartCandle size={14} color="#fff" />
-      </button>
-
       {/* Remove */}
-      <button onClick={onRemove}
-        className="w-6 h-6 flex items-center justify-center rounded-full cursor-pointer transition-colors hover:opacity-70"
+      <button onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        className="w-6 h-6 flex items-center justify-center rounded-full cursor-pointer transition-colors hover:opacity-70 flex-shrink-0"
         style={{ background: isDark ? "#1e293b" : "#f1f5f9", color: "#94a3b8" }}>
         <IconX size={11} />
       </button>

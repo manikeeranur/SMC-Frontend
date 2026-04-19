@@ -524,9 +524,21 @@ export default function TradingChartModal({
       chart.timeScale().fitContent();
     }
 
-    // Crosshair tooltip
+    // Show last candle OHLC by default
+    const lastCandle = candles[candles.length - 1];
+    if (lastCandle) {
+      const lastHa = chartType === "ha" ? toHeikinAshi(candles).at(-1) : null;
+      const lc = lastHa ?? lastCandle;
+      setOhlc({ o: lc.open, h: lc.high, l: lc.low, c: lc.close, v: lastCandle.volume });
+    }
+
+    // Crosshair tooltip — restore last candle when crosshair leaves
     chart.subscribeCrosshairMove((param: any) => {
-      if (!param.time || !param.seriesData?.size) { setOhlc(null); return; }
+      if (!param.time || !param.seriesData?.size) {
+        const last = rawRef.current[rawRef.current.length - 1];
+        if (last) setOhlc({ o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume });
+        return;
+      }
       const md = param.seriesData.get(s.main);
       const vd = param.seriesData.get(s.vol);
       if (md) setOhlc({ o: md.open ?? md.value ?? 0, h: md.high ?? md.value ?? 0, l: md.low ?? md.value ?? 0, c: md.close ?? md.value ?? 0, v: vd?.value ?? 0 });

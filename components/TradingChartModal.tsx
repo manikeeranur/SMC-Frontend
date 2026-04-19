@@ -393,6 +393,9 @@ export default function TradingChartModal({
   const tlDataRef    = useRef<typeof tradeLines>(null);
   const tlSeriesRef  = useRef<{ ep:any; tp:any; sp:any } | null>(null);
   const isDarkRef    = useRef(isDark);
+  const fetchedFromRef  = useRef<string>("");
+  const hasMoreRef      = useRef(false);
+  const loadingMoreRef  = useRef(false);
 
   const isCE  = type === "CE";
   const clr   = isEquity ? "#16a34a" : isCE ? "#0284c7" : "#dc2626";
@@ -413,8 +416,10 @@ export default function TradingChartModal({
   useEffect(() => {
     setLoading(true);
     setError(null);
-    rawRef.current   = [];
-    currentRef.current = null;
+    rawRef.current       = [];
+    currentRef.current   = null;
+    hasMoreRef.current     = false;
+    loadingMoreRef.current = false;
 
     const today = new Date().toISOString().split("T")[0];
 
@@ -434,16 +439,28 @@ export default function TradingChartModal({
         .catch(() => ({ rows: [] }))
         .then(mapRows);
     } else if (tfCfg.kiteInterval === "minute") {
-      // Intraday minute: equity gets last 5 days, options get full expiry period
-      const fromDate = isEquity ? dateFromDaysAgo(5) : getExpiryStart(expiry);
-      fetchPromise = optionsApi
-        .candleRange(token, fromDate, today, "minute")
-        .catch(() => ({ rows: [] }))
-        .then(mapRows);
+      if (isEquity) {
+        // 60 days initial load (fast, 1 Kite call); scroll left loads older chunks on demand
+        const fromDate = dateFromDaysAgo(60);
+        fetchedFromRef.current = fromDate;
+        hasMoreRef.current     = true;
+        fetchPromise = optionsApi
+          .candleRange(token, fromDate, today, "minute")
+          .catch(() => ({ rows: [] }))
+          .then(mapRows);
+      } else {
+        // FNO options: expiry period only
+        fetchPromise = optionsApi
+          .candleRange(token, getExpiryStart(expiry), today, "minute")
+          .catch(() => ({ rows: [] }))
+          .then(mapRows);
+      }
     } else {
-      // 60minute (1h, 4h): use standard fromDays
+      // 60minute (1h, 4h): 60 days initial for equity; scroll-lazy loads up to 5 years
+      const fromDate = isEquity ? dateFromDaysAgo(60) : getExpiryStart(expiry);
+      if (isEquity) { fetchedFromRef.current = fromDate; hasMoreRef.current = true; }
       fetchPromise = optionsApi
-        .candleRange(token, dateFromDaysAgo(tfCfg.fromDays), today, tfCfg.kiteInterval)
+        .candleRange(token, fromDate, today, tfCfg.kiteInterval)
         .catch(() => ({ rows: [] }))
         .then(mapRows);
     }
@@ -613,14 +630,18 @@ export default function TradingChartModal({
       const fi = candles.findIndex(c => c.time >= lastDayStart);
       try { chart.timeScale().applyOptions({ rightOffset: 0 }); } catch {}
       chart.timeScale().setVisibleLogicalRange({ from: fi >= 0 ? fi : 0, to: candles.length - 1 });
-    } else if (tfCfg.kiteInterval === "minute" && candles.length > 0) {
-      // Tech chart: show last trading day session, allow scroll for history
+    } else if ((tfCfg.kiteInterval === "minute" || tfCfg.kiteInterval === "60minute") && candles.length > 0) {
+      // Pin today's 9:15 AM candle at the left edge; show full day extent (9:15–3:30) on the right
       const lastTime     = candles[candles.length - 1].time;
       const lastDayStart = Math.floor(lastTime / 86400) * 86400;
-      const firstIdx     = candles.findIndex(c => c.time >= lastDayStart);
+      const todayOpen    = lastDayStart + 9 * 3600 + 15 * 60; // 9:15 AM (IST-as-UTC encoding)
+      const firstIdx     = candles.findIndex(c => c.time >= todayOpen);
+      const startIdx     = firstIdx >= 0 ? firstIdx : candles.length - 1;
+      // Full trading session = 375 minutes; scale to current TF
+      const barsPerDay   = aggMin > 1 ? Math.ceil(375 / aggMin) : tfCfg.kiteInterval === "60minute" ? 7 : 375;
       chart.timeScale().setVisibleLogicalRange({
-        from: firstIdx > 0 ? firstIdx - 1 : 0,
-        to:   candles.length - 0.5,
+        from: startIdx > 0 ? startIdx - 0.5 : 0,
+        to:   startIdx + barsPerDay + 5,
       });
     } else {
       chart.timeScale().fitContent();
@@ -652,7 +673,77 @@ export default function TradingChartModal({
       try { tlSeriesRef.current = mkTLs(s.main, tlDataRef.current); } catch {}
     }
 
-    return () => { chart.remove(); chartRef.current = null; seriesRef.current = {}; };
+    // ── Scroll-lazy: load older 60-day chunks when user scrolls to left edge ────
+    let unsubRange: (() => void) | null = null;
+    if ((tfCfg.kiteInterval === "minute" || tfCfg.kiteInterval === "60minute") && isEquity) {
+      const loadMore = async () => {
+        if (!hasMoreRef.current || loadingMoreRef.current) return;
+        loadingMoreRef.current = true;
+        try {
+          const oldFrom  = fetchedFromRef.current;
+          const oldFromD = new Date(oldFrom);
+          const toD      = new Date(oldFromD); toD.setDate(toD.getDate() - 1);
+          const newFromD = new Date(oldFromD); newFromD.setDate(newFromD.getDate() - 60);
+          const limit5Y  = new Date(); limit5Y.setDate(limit5Y.getDate() - 1825);
+          if (newFromD <= limit5Y) { newFromD.setTime(limit5Y.getTime()); hasMoreRef.current = false; }
+
+          const newFromStr = newFromD.toISOString().split("T")[0];
+          const toStr      = toD.toISOString().split("T")[0];
+
+          const raw = await optionsApi.candleRange(token, newFromStr, toStr, tfCfg.kiteInterval).catch(() => ({ rows: [] }));
+          const newCandles = filterMarketHours(
+            (raw.rows ?? []).map((r: any) => ({
+              time: istToUnix(r.date), open: r.open, high: r.high,
+              low: r.low, close: r.close, volume: r.volume ?? 0,
+            }))
+          );
+          if (newCandles.length === 0) { hasMoreRef.current = false; return; }
+
+          fetchedFromRef.current = newFromStr;
+          const prevAggLen = aggMin > 1 ? aggregate(rawRef.current, aggMin).length : rawRef.current.length;
+          rawRef.current   = [...newCandles, ...rawRef.current];
+          const newAgg     = aggMin > 1 ? aggregate(rawRef.current, aggMin) : rawRef.current;
+          const addedBars  = newAgg.length - prevAggLen;
+
+          const closes2 = newAgg.map(c => c.close);
+          const rsiArr2 = computeRSI(closes2);
+          const bbArr2  = computeBB(closes2);
+          const tc = (c: Candle) => c.time as any;
+          const s2 = seriesRef.current;
+
+          if (ctRef.current === "candle") {
+            s2.main?.setData(newAgg.map(c => ({ time: tc(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+          } else if (ctRef.current === "ha") {
+            s2.main?.setData(toHeikinAshi(newAgg).map(c => ({ time: tc(c), open: c.open, high: c.high, low: c.low, close: c.close })));
+          } else {
+            s2.main?.setData(newAgg.map(c => ({ time: tc(c), value: c.close })));
+          }
+          const bbV2 = newAgg.map((c, i) => ({ c, bb: bbArr2[i] })).filter(x => x.bb.mid != null);
+          s2.bbUp?.setData(bbV2.map(x => ({ time: tc(x.c), value: x.bb.up! })));
+          s2.bbMid?.setData(bbV2.map(x => ({ time: tc(x.c), value: x.bb.mid! })));
+          s2.bbDn?.setData(bbV2.map(x => ({ time: tc(x.c), value: x.bb.dn! })));
+          if (indRef.current.has("VOL")) {
+            s2.vol?.setData(newAgg.map(c => ({ time: tc(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
+          }
+          const rsiV2 = newAgg.map((c, i) => ({ c, rsi: rsiArr2[i] })).filter(x => x.rsi != null);
+          s2.rsi?.setData(rsiV2.map(x => ({ time: tc(x.c), value: x.rsi! })));
+
+          try {
+            const range = chart.timeScale().getVisibleLogicalRange();
+            if (range && addedBars > 0) {
+              chart.timeScale().setVisibleLogicalRange({ from: range.from + addedBars, to: range.to + addedBars });
+            }
+          } catch {}
+        } finally {
+          loadingMoreRef.current = false;
+        }
+      };
+      const onRangeChange = (range: any) => { if (range && range.from <= 5) loadMore(); };
+      chart.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange);
+      unsubRange = () => chart.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange);
+    }
+
+    return () => { unsubRange?.(); chart.remove(); chartRef.current = null; seriesRef.current = {}; };
   }, [loading, tf, chartType, isDark]);
 
   // ── Live ticks via WebSocket ──────────────────────────────────────────────

@@ -306,7 +306,7 @@ export function ResultsContent() {
               <div style={{ minWidth: "900px" }}>
                 <div className="grid flex-shrink-0 border-b-2"
                   style={{ gridTemplateColumns: COLS_DESKTOP, borderColor: isDark ? "#1e2a3a" : "#cbd5e1", background: isDark ? "#080d14" : "#f8fafc" }}>
-                  {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS","P&L · LOT (65)","MAX PTS"].map(h => (
+                  {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${LOT_SIZE})`,"MAX PTS"].map(h => (
                     <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase"
                       style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{h}</div>
                   ))}
@@ -376,7 +376,7 @@ export function ResultsContent() {
                           </div>
                           <div className="flex items-baseline gap-1 mt-0.5">
                             <span className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: pnlClr }}>{fmtLotPnl(lPnL)}</span>
-                            <span className="text-[7px] font-bold" style={{ ...MONO, color: pnlClr }}>×65</span>
+                            <span className="text-[7px] font-bold" style={{ ...MONO, color: pnlClr }}>×{LOT_SIZE}</span>
                           </div>
                           <div className="text-[8px]" style={{ ...MONO, color: pnlClr }}>{pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%</div>
                         </div>
@@ -402,7 +402,7 @@ export function ResultsContent() {
                   { label: "EOD / OPEN",   val: `${eod}`,                      color: "#b45309" },
                   { label: "WIN RATE",     val: winRate ? `${winRate}%` : "—", color: winRate && Number(winRate) >= 70 ? "#16a34a" : "#e11d48" },
                   { label: "PREMIUM P&L",  val: `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(2)} ₹`, color: pnlColor(totalPnL) },
-                  { label: "LOT P&L (65×)", val: fmtLotPnl(lotPnL),           color: pnlColor(lotPnL) },
+                  { label: `LOT P&L (${LOT_SIZE}×)`, val: fmtLotPnl(lotPnL), color: pnlColor(lotPnL) },
                 ].map(({ label, val, color }) => (
                   <div key={label} className="px-3 py-2.5" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
                     <div className="text-[7px] tracking-[1.5px] uppercase mb-1" style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{label}</div>

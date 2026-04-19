@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { optionsApi, accountApi, createWS } from "@/lib/api";
 import { calcRR } from "@/lib/options";
-import { LOT_SIZE } from "@/lib/constants";
+import { getLotSize } from "@/lib/constants";
 import { useTheme } from "@/lib/theme";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -401,6 +401,7 @@ export default function TradingChartModal({
   const tfCfg = TF_LIST.find(t => t.label === tf)!;
   // All TFs available for all charts; 1W only makes sense for equity but allowed everywhere
   const availableTFs = TF_LIST;
+  const activeLotSize = getLotSize(index);
 
   // ── Fetch wallet ─────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -897,7 +898,7 @@ export default function TradingChartModal({
     if (!tsym) { setOS({ loading: false, result: "✗ No trading symbol" }); return; }
     setOS({ loading: true, result: null });
     try {
-      const qty = isEquity ? equityQty : orderLots * LOT_SIZE;
+      const qty = isEquity ? equityQty : orderLots * activeLotSize;
       await accountApi.placeOrder(tsym, action, qty, isEquity ? "NSE" : undefined);
       const entry     = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
       const rr        = calcRR(entry);
@@ -942,7 +943,7 @@ export default function TradingChartModal({
   const eqCharges    = isEquity && liveOrLast > 0
     ? calcEquityCharges(liveOrLast, equityQty, isIntraday5x)
     : null;
-  const stockCost    = isEquity ? liveOrLast * equityQty : liveOrLast * orderLots * LOT_SIZE;
+  const stockCost    = isEquity ? liveOrLast * equityQty : liveOrLast * orderLots * activeLotSize;
   const approxBuy    = isEquity ? stockCost + (eqCharges?.total ?? 0) : stockCost;
   // Max shares affordable with effective wallet
   const maxQty       = isEquity && liveOrLast > 0 && effectiveWallet !== null
@@ -1503,7 +1504,7 @@ export default function TradingChartModal({
                 className="w-7 h-7 rounded-full flex items-center justify-center text-[14px] font-bold cursor-pointer"
                 style={{ background: btnBg, color: btnClr }}>+</button>
               <span className="text-[9px] ml-auto" style={{ ...MONO, color: txtMuted }}>
-                {orderLots} × {LOT_SIZE} = {orderLots * LOT_SIZE} qty
+                {orderLots} × {activeLotSize} = {orderLots * activeLotSize} qty
               </span>
             </>
           )}

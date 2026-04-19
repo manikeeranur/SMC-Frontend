@@ -40,7 +40,7 @@ import {
   AuthError,
 } from "@/lib/api";
 
-import { LOT_SIZE } from "@/lib/constants";
+import { LOT_SIZE, SENSEX_LOT_SIZE } from "@/lib/constants";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import {
   Select,
@@ -200,7 +200,7 @@ function OptionsPageInner() {
 
   // ── Option chain mode toggles ───────────────────────────────────────────────
   const [chainIndex, setChainIndex] = useState<"NIFTY" | "SENSEX">("NIFTY");
-  const chainLotSize = chainIndex === "SENSEX" ? 20 : LOT_SIZE;
+  const chainLotSize = chainIndex === "SENSEX" ? SENSEX_LOT_SIZE : LOT_SIZE;
   const [scalperOn, setScalerOn] = useState(true);
   const [strategyOn, setStrategyOn] = useState(false);
   type ChainOrder = {
@@ -5751,7 +5751,7 @@ function SMCTableView({
                             unit
                           </span>
                         </div>
-                        {/* lot P&L = unit × 65 */}
+                        {/* lot P&L = unit × LOT_SIZE */}
                         <div className="flex items-baseline gap-1 mt-0.5">
                           <span
                             className="text-[12px] font-bold tabular-nums"

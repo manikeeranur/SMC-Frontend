@@ -399,9 +399,14 @@ export default function TradingChartModal({
 
   const isCE  = type === "CE";
   const clr   = isEquity ? "#16a34a" : isCE ? "#0284c7" : "#dc2626";
+  const fmtExpiry = (exp: string) => {
+    const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+    const parts = exp?.split("-");
+    return parts?.length === 3 ? `${parseInt(parts[2])} ${MONTHS[parseInt(parts[1]) - 1]}` : exp;
+  };
   const chartLabel = isEquity
     ? (tradingsymbol ?? sym ?? `Token ${token}`)
-    : `${index} ${strike} ${type}`;
+    : `${index} ${fmtExpiry(expiry)} ${strike} ${type}`;
   const tfCfg = TF_LIST.find(t => t.label === tf)!;
   // All TFs available for all charts; 1W only makes sense for equity but allowed everywhere
   const availableTFs = TF_LIST;
@@ -1270,7 +1275,11 @@ export default function TradingChartModal({
         {/* Symbol badge + Buy/Sell toggles — bottom-left (small screens, tech chart only) */}
         {!simpleMode && !loading && !error && !isIndex && (
           <div className="lg:hidden absolute left-2 z-20 flex flex-col gap-1 items-start" style={{ bottom: "100px" }}>
-            <div className="flex gap-1.5">
+              <span className="flex items-center h-7 px-2.5 rounded text-[9px] font-black"
+                style={{ ...MONO, color: isCE ? "#38bdf8" : "#f472b6", background: isCE ? "#38bdf815" : "#f472b615", border: `1px solid ${isCE ? "#38bdf840" : "#f472b640"}` }}>
+                {chartLabel}
+              </span>         
+           <div className="flex gap-1.5">
               <button onClick={() => setTO(v => !v)}
                 className="px-2.5 py-1 rounded text-[9px] font-black cursor-pointer transition-all"
                 style={{ ...MONO, background: tradeOpen ? "#e11d48" : "#e11d4820", color: tradeOpen ? "#fff" : "#e11d48", border: "1px solid #e11d4840" }}>

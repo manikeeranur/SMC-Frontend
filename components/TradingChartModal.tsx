@@ -237,6 +237,9 @@ export default function TradingChartModal({
   const [equityMode, setEquityMode] = useState<"intraday" | "swing">(isEquity ? "swing" : "intraday");
   const [equityQty, setEquityQty] = useState(1);
   const [equityQtyStr, setEquityQtyStr] = useState("1");
+  const [rsiHeight, setRsiHeight] = useState(80);
+  const rsiHeightRef = useRef(80);
+  const rsiDragRef   = useRef<{ startY: number; startH: number } | null>(null);
   const indDropRef  = useRef<HTMLDivElement>(null);
 
   // ── Replay state ─────────────────────────────────────────────────────────────
@@ -260,6 +263,25 @@ export default function TradingChartModal({
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [indOpen]);
+
+  // RSI pane drag-to-resize
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!rsiDragRef.current) return;
+      const delta = rsiDragRef.current.startY - e.clientY;
+      const newH  = Math.max(40, Math.min(300, rsiDragRef.current.startH + delta));
+      rsiHeightRef.current = newH;
+      setRsiHeight(newH);
+      try {
+        if (seriesRef.current.rsiPane) seriesRef.current.rsiPane.setHeight(newH);
+        seriesRef.current.rsi?.applyOptions({ visible: true });
+      } catch {}
+    };
+    const onUp = () => { rsiDragRef.current = null; };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup",   onUp);
+    return () => { document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); };
+  }, []);
 
   // Clean up replay timer on unmount
   useEffect(() => () => { if (replayTimerRef.current) clearInterval(replayTimerRef.current); }, []);
@@ -403,7 +425,7 @@ export default function TradingChartModal({
           if (h === 0 && m === "00") return `${day} ${mon} ${yr}`;
           return `${day} ${mon} ${yr} ${h12}:${m} ${ap}`;
         },
-        priceFormatter: (p: number) => `₹${p.toFixed(2)}`,
+        priceFormatter: (p: number) => p.toFixed(2),
       },
       timeScale: {
         timeVisible: true,
@@ -455,42 +477,32 @@ export default function TradingChartModal({
       lineWidth: 1, lastValueVisible: false, priceLineVisible: false, visible: ind.has("BB"),
       autoscaleInfoProvider: () => null,  // BB doesn't drive the price axis range
     };
-    s.bbUp  = chart.addSeries(LineSeries, { ...bbBase, color: "#a855f7", lineStyle: 1 } as any, 0);
-    s.bbMid = chart.addSeries(LineSeries, { ...bbBase, color: "#a855f7", lineStyle: 2 } as any, 0);
-    s.bbDn  = chart.addSeries(LineSeries, { ...bbBase, color: "#a855f7", lineStyle: 1 } as any, 0);
+    s.bbUp  = chart.addSeries(LineSeries, { ...bbBase, color: "#16a34a", lineStyle: 0 } as any, 0);
+    s.bbMid = chart.addSeries(LineSeries, { ...bbBase, color: "#3b82f6", lineStyle: 0 } as any, 0);
+    s.bbDn  = chart.addSeries(LineSeries, { ...bbBase, color: "#dc2626", lineStyle: 0 } as any, 0);
 
-    // Volume — overlay on main pane with invisible scale at bottom (TradingView style)
+    // Volume — overlay on main pane at bottom; start with empty data so bars are invisible until toggled
     s.vol = chart.addSeries(HistogramSeries, {
       priceScaleId: "vol",
-      priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false, visible: ind.has("VOL"),
+      priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false,
     } as any, 0);
-    try {
-      chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.85, bottom: 0 }, visible: false });
-    } catch {}
+    // Apply margins now that the series exists (scale is created), then empty data = hidden
+    try { chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 }, visible: false }); } catch {}
+    if (!ind.has("VOL")) s.vol.setData([]);
 
-    // RSI — separate pane via pane-object API (avoids RSI values 0-100 mixing with prices)
-    try {
-      const panes = (chart as any).panes?.() ?? [];
-      const rsiPane = panes[1] ?? (chart as any).createPane?.();
-      if (rsiPane) {
-        s.rsi = rsiPane.addSeries(LineSeries, {
-          color: "#f59e0b", lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false, visible: ind.has("RSI"),
-        } as any);
-        rsiPane.setHeight(ind.has("RSI") ? 75 : 0);
-      }
-    } catch {}
-    if (!s.rsi) {
-      // Fallback: add on main pane with separate scale
-      s.rsi = chart.addSeries(LineSeries, {
-        priceScaleId: "rsi",
-        color: "#f59e0b", lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false, visible: ind.has("RSI"),
-      } as any, 0);
-      try { chart.priceScale("rsi").applyOptions({ scaleMargins: { top: 0.7, bottom: 0 }, visible: false }); } catch {}
-    }
+    // RSI — dedicated pane 1; use visible flag + pane height to control display
+    s.rsi = chart.addSeries(LineSeries, {
+      color: "#f59e0b", lineWidth: 1.5, lastValueVisible: true, priceLineVisible: false,
+      priceFormat: { type: "custom", formatter: (v: number) => v.toFixed(1) },
+      visible: ind.has("RSI"),
+    } as any, 1);
+    const allPanes = (chart as any).panes?.() ?? [];
+    s.rsiPane = allPanes[1] ?? null;
+    if (s.rsiPane) s.rsiPane.setHeight(ind.has("RSI") ? rsiHeightRef.current : 0);
     if (ind.has("RSI") && s.rsi) {
       try {
-        s.rsi.createPriceLine({ price: 70, color: "rgba(220,38,38,0.5)", lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "70" });
-        s.rsi.createPriceLine({ price: 30, color: "rgba(22,163,74,0.5)",  lineWidth: 1, lineStyle: 2, axisLabelVisible: false, title: "30" });
+        s.rsiL70 = s.rsi.createPriceLine({ price: 70, color: "rgba(220,38,38,0.7)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "70" });
+        s.rsiL30 = s.rsi.createPriceLine({ price: 30, color: "rgba(22,163,74,0.7)",  lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "30" });
       } catch {}
     }
 
@@ -507,7 +519,7 @@ export default function TradingChartModal({
     s.bbUp.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.up!  })));
     s.bbMid.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.mid! })));
     s.bbDn.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.dn!  })));
-    s.vol.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
+    if (ind.has("VOL")) s.vol.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
     const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
     s.rsi.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
 
@@ -605,13 +617,29 @@ export default function TradingChartModal({
     const on = next.has(ind);
     const s  = seriesRef.current;
     if (ind === "BB")  { s.bbUp?.applyOptions({ visible: on }); s.bbMid?.applyOptions({ visible: on }); s.bbDn?.applyOptions({ visible: on }); }
-    if (ind === "VOL") { s.vol?.applyOptions({ visible: on }); }
+    if (ind === "VOL") {
+      // Show/hide by swapping data — no reliance on series `visible` option
+      if (on) {
+        const aggMin = tfMinRef.current;
+        const candles = aggMin > 1 ? aggregate(rawRef.current, aggMin) : rawRef.current;
+        const t = (c: Candle) => c.time as any;
+        s.vol?.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
+      } else {
+        s.vol?.setData([]);
+      }
+    }
     if (ind === "RSI") {
+      // Primary: visible flag. Secondary: pane height (if pane API available)
       s.rsi?.applyOptions({ visible: on });
-      // Resize RSI pane
+      try { if (s.rsiPane) s.rsiPane.setHeight(on ? rsiHeightRef.current : 0); } catch {}
       try {
-        const p = (chartRef.current as any)?.panes?.();
-        if (p?.[1]) p[1].setHeight(on ? 75 : 0);
+        if (on && s.rsi) {
+          s.rsiL70 = s.rsi.createPriceLine({ price: 70, color: "rgba(220,38,38,0.7)", lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "70" });
+          s.rsiL30 = s.rsi.createPriceLine({ price: 30, color: "rgba(22,163,74,0.7)",  lineWidth: 1, lineStyle: 0, axisLabelVisible: true, title: "30" });
+        } else if (!on && s.rsi) {
+          if (s.rsiL70) { s.rsi.removePriceLine(s.rsiL70); s.rsiL70 = null; }
+          if (s.rsiL30) { s.rsi.removePriceLine(s.rsiL30); s.rsiL30 = null; }
+        }
       } catch {}
     }
   }
@@ -663,7 +691,7 @@ export default function TradingChartModal({
       s.bbUp?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.up! })));
       s.bbMid?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.mid! })));
       s.bbDn?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.dn! })));
-      s.vol?.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
+      if (indRef.current.has("VOL")) s.vol?.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
       const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
       s.rsi?.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
     } catch {}
@@ -1097,6 +1125,21 @@ export default function TradingChartModal({
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {/* RSI pane resize handle */}
+        {indicators.has("RSI") && !loading && !error && (
+          <div
+            className="absolute left-0 right-0 z-30 flex items-center justify-center group cursor-ns-resize select-none"
+            style={{ bottom: rsiHeight - 3, height: 8 }}
+            onMouseDown={(e) => {
+              e.preventDefault();
+              rsiDragRef.current = { startY: e.clientY, startH: rsiHeightRef.current };
+            }}
+          >
+            <div className="w-12 h-[3px] rounded-full transition-colors"
+              style={{ background: isDark ? "#334155" : "#cbd5e1" }} />
           </div>
         )}
 

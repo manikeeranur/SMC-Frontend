@@ -1212,7 +1212,7 @@ function OptionsPageInner() {
           ).map(({ tab, icon, label, badge }: any) => (
             <button
               key={tab}
-              onClick={() => setActiveTab(tab)}
+              onClick={() => { setActiveTab(tab); setChartTarget(null); }}
               title={label}
               className="relative flex flex-col items-center justify-center w-11 h-11 rounded-xl cursor-pointer transition-all"
               style={{

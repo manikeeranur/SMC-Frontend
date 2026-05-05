@@ -40,7 +40,7 @@ import {
   AuthError,
 } from "@/lib/api";
 
-import { LOT_SIZE, SENSEX_LOT_SIZE } from "@/lib/constants";
+import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, MARKET_HOLIDAYS, MARKET_HOLIDAYS_MAP } from "@/lib/constants";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import {
   Select,
@@ -75,22 +75,6 @@ import {
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
 
-const MARKET_HOLIDAYS_2026: { date: string; name: string }[] = [
-  { date: "2026-01-26", name: "Republic Day" },
-  { date: "2026-02-18", name: "Mahashivratri" },
-  { date: "2026-03-20", name: "Holi" },
-  { date: "2026-04-03", name: "Good Friday" },
-  { date: "2026-04-14", name: "Dr. Ambedkar Jayanti" },
-  { date: "2026-05-01", name: "Maharashtra Day" },
-  { date: "2026-05-19", name: "Buddha Purnima" },
-  { date: "2026-06-16", name: "Eid-ul-Adha" },
-  { date: "2026-10-02", name: "Gandhi Jayanti" },
-  { date: "2026-10-22", name: "Dussehra" },
-  { date: "2026-11-10", name: "Diwali — Laxmi Puja" },
-  { date: "2026-11-11", name: "Diwali — Balipratipada" },
-  { date: "2026-11-30", name: "Guru Nanak Jayanti" },
-  { date: "2026-12-25", name: "Christmas" },
-];
 const DAY_NAMES = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
 function holidayDayName(dateStr: string) {
   const d = new Date(dateStr + "T00:00:00");
@@ -1131,7 +1115,7 @@ function OptionsPageInner() {
               "DEC",
             ][+mm];
             const isWeekend = dayIdx === 0 || dayIdx === 6;
-            const holiday = MARKET_HOLIDAYS_2026.find(
+            const holiday = MARKET_HOLIDAYS.find(
               (h) => h.date === todayStr,
             );
             const status = holiday
@@ -1959,8 +1943,8 @@ function OptionsPageInner() {
               autoTradeEnabled={autoTradeEnabled}
               autoPositions={autoPositions}
               onToggleAutoTrade={toggleAutoTrade}
-              onOpenChart={(token, strike, type) =>
-                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", index: "NIFTY" })
+              onOpenChart={(token, strike, type, tradingsymbol) =>
+                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", tradingsymbol, index: "NIFTY" })
               }
               chainRows={data?.rows ?? []}
             />
@@ -2500,7 +2484,7 @@ function OptionsPageInner() {
                 style={{ ...MONO, background: "#ea580c15", color: "#ea580c" }}
               >
                 {
-                  MARKET_HOLIDAYS_2026.filter(
+                  MARKET_HOLIDAYS.filter(
                     (h) => h.date >= new Date().toISOString().split("T")[0],
                   ).length
                 }{" "}
@@ -2523,7 +2507,7 @@ function OptionsPageInner() {
               className="overflow-y-auto px-3 pb-3"
               style={{ maxHeight: "240px", scrollbarWidth: "none" }}
             >
-              {MARKET_HOLIDAYS_2026.map((h) => {
+              {MARKET_HOLIDAYS.map((h) => {
                 const today = new Date().toISOString().split("T")[0];
                 const isPast = h.date < today;
                 const day = holidayDayName(h.date);
@@ -2982,13 +2966,13 @@ function ChainRow({
           <div className="px-2 py-2 text-right border-r border-[#e2e8f0] group">
             {scalperOn ? (
               <button onClick={() => onOrder(ce, "BUY")} className="flex flex-col items-end w-full">
-                <span className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</span>
+                <span className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= SMC_MIN_PREMIUM && ce.ltp <= SMC_MAX_PREMIUM ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</span>
                 <span className={`text-[9px] font-bold ${cePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{cePct >= 0 ? "+" : ""}{cePct.toFixed(2)}%</span>
               </button>
             ) : strategyOn ? (
               <div className="flex items-center justify-end gap-1.5">
                 <div>
-                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= SMC_MIN_PREMIUM && ce.ltp <= SMC_MAX_PREMIUM ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</div>
                   <div className={`text-[8px] ${cePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{cePct >= 0 ? "+" : ""}{cePct.toFixed(2)}%</div>
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -3006,7 +2990,7 @@ function ChainRow({
                   <CandleIcon color="#0284c7" />
                 </button>
                 <div>
-                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= 200 && ce.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${ce.ltp >= SMC_MIN_PREMIUM && ce.ltp <= SMC_MAX_PREMIUM ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{ce.ltp.toFixed(2)}</div>
                   <div className={`text-[8px] ${ce.ltpChange >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{ce.ltpChange >= 0 ? "▲" : "▼"}{Math.abs(ce.ltpChange).toFixed(2)}</div>
                 </div>
               </div>
@@ -3039,7 +3023,7 @@ function ChainRow({
           <div className="px-2 py-2 text-left border-l border-[#e2e8f0] group">
             {scalperOn ? (
               <button onClick={() => onOrder(pe, "BUY")} className="flex flex-col items-start w-full">
-                <span className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</span>
+                <span className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= SMC_MIN_PREMIUM && pe.ltp <= SMC_MAX_PREMIUM ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</span>
                 <span className={`text-[9px] font-bold ${pePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pePct >= 0 ? "+" : ""}{pePct.toFixed(2)}%</span>
               </button>
             ) : strategyOn ? (
@@ -3049,14 +3033,14 @@ function ChainRow({
                   <OrderBtn color="#e11d48" label="S" onClick={() => onOrder(pe, "SELL")} />
                 </div>
                 <div>
-                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= SMC_MIN_PREMIUM && pe.ltp <= SMC_MAX_PREMIUM ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</div>
                   <div className={`text-[8px] ${pePct >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pePct >= 0 ? "+" : ""}{pePct.toFixed(2)}%</div>
                 </div>
               </div>
             ) : (
               <div className="flex items-center gap-1.5">
                 <div>
-                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= 200 && pe.ltp <= 300 ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</div>
+                  <div className={`text-[13px] font-bold tabular-nums leading-tight ${pe.ltp >= SMC_MIN_PREMIUM && pe.ltp <= SMC_MAX_PREMIUM ? "text-[#16a34a]" : "text-[#1e293b]"}`} style={MONO}>₹{pe.ltp.toFixed(2)}</div>
                   <div className={`text-[8px] ${pe.ltpChange >= 0 ? "text-[#16a34a]" : "text-[#e11d48]"}`} style={MONO}>{pe.ltpChange >= 0 ? "▲" : "▼"}{Math.abs(pe.ltpChange).toFixed(2)}</div>
                 </div>
                 <button
@@ -4532,7 +4516,7 @@ function SMCTableView({
   autoTradeEnabled: boolean;
   autoPositions: any[];
   onToggleAutoTrade: () => void;
-  onOpenChart: (token: number, strike: number, type: "CE" | "PE") => void;
+  onOpenChart: (token: number, strike: number, type: "CE" | "PE", tradingsymbol?: string) => void;
   chainRows: any[];
 }) {
   const [mode, setMode] = useState<"live" | "backtest">("live");
@@ -4559,7 +4543,19 @@ function SMCTableView({
   const total = wins + losses;
   const wr = total > 0 ? ((wins / total) * 100).toFixed(1) : null;
 
-  const LOT_QTY = LOT_SIZE;
+  const LOT_QTY = LOT_SIZE * NUM_LOTS;
+
+  useEffect(() => {
+    const color = active > 0 ? "#16a34a" : "#dc2626";
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="${color}"/></svg>`;
+    const dataUrl = `data:image/svg+xml,${encodeURIComponent(svg)}`;
+    document.querySelectorAll("link[rel*='icon']").forEach(el => el.remove());
+    const link = document.createElement("link");
+    link.rel = "icon";
+    link.type = "image/svg+xml";
+    link.href = dataUrl;
+    document.head.appendChild(link);
+  }, [active]);
 
   // concept pill color map
   const conceptColor: Record<string, string> = {
@@ -4902,7 +4898,7 @@ function SMCTableView({
           </span>
         ))}
         <span className="text-[7px] text-[#94a3b8] ml-2" style={MONO}>
-          · min 2 concepts · LTP ₹200–₹300 · SL −12% · Target +24% · entry ≥
+          · min 2 concepts · LTP ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM} · SL −12% · Target +24% · entry ≥
           09:21
         </span>
       </div>
@@ -5163,7 +5159,7 @@ function SMCTableView({
                       </div>
                       {a.strike && a.direction && (
                         <button
-                          onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE"); }}
+                          onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE", a.leg?.tradingsymbol); }}
                           className="w-5 h-5 flex items-center justify-center cursor-pointer"
                           style={{ color: mdirClr, opacity: 0.7 }}
                           title="Open chart"
@@ -5392,7 +5388,7 @@ function SMCTableView({
                   "T1",
                   "T2",
                   "STATUS",
-                  `P&L · LOT (${LOT_SIZE})`,
+                  `P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
                   "MAX PTS",
                   "",
                 ].map((h) => (
@@ -5764,7 +5760,7 @@ function SMCTableView({
                             className="text-[7px] font-bold"
                             style={{ ...MONO, color: pnlColor }}
                           >
-                            ×{LOT_SIZE}
+                            ×{LOT_QTY}
                           </span>
                         </div>
                         <div
@@ -5799,7 +5795,7 @@ function SMCTableView({
                       <div className="px-2 py-2.5 flex items-center justify-center gap-1 group">
                         {a.strike && a.direction && (
                           <button
-                            onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE"); }}
+                            onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE", a.leg?.tradingsymbol); }}
                             title="Open chart"
                             className="transition-opacity flex-shrink-0 w-5 h-5 flex items-center justify-center rounded cursor-pointer"
                             style={{ color: dirColor, opacity: 0.7 }}
@@ -5866,7 +5862,7 @@ function SMCTableView({
                 color: wr && Number(wr) >= 70 ? "#16a34a" : "#e11d48",
               },
               {
-                label: `LOT P&L (${LOT_SIZE}×)`,
+                label: `LOT P&L (${LOT_QTY}×)`,
                 val: tableAlerts.length > 0 ? fmtLotPnl(totalLotPnl) : "—",
                 color: totalLotPnl >= 0 ? "#16a34a" : "#e11d48",
                 sub:
@@ -6136,7 +6132,7 @@ function OhlcTab({
   const tradingDays = useMemo(() => getTradingDays(30), []);
 
   const inRange = (p: number | null | undefined) =>
-    p != null && p >= 200 && p <= 300;
+    p != null && p >= SMC_MIN_PREMIUM && p <= SMC_MAX_PREMIUM;
 
   // Single fetch: historical NIFTY spot → historical ATM → ±15 strikes → 9:15 prices
   // All done server-side so the correct historical ATM is always used.
@@ -6390,7 +6386,7 @@ function OhlcTab({
                 className="text-[8px] font-bold tracking-[1.5px] text-[#475569] uppercase"
                 style={MONO}
               >
-                ★ TOP OPENING PRICE · {fmtTradingDay(ohlcDate)} · ₹200–₹300 SCAN
+                ★ TOP OPENING PRICE · {fmtTradingDay(ohlcDate)} · ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM} SCAN
                 RANGE
               </div>
             </div>
@@ -6431,7 +6427,7 @@ function OhlcTab({
                   </>
                 ) : (
                   <div className="text-[9px] text-[#94a3b8]" style={MONO}>
-                    No CE in ₹200–₹300 range
+                    No CE in ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM} range
                   </div>
                 )}
               </div>
@@ -6477,7 +6473,7 @@ function OhlcTab({
                   </>
                 ) : (
                   <div className="text-[9px] text-[#94a3b8]" style={MONO}>
-                    No PE in ₹200–₹300 range
+                    No PE in ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM} range
                   </div>
                 )}
               </div>
@@ -6589,7 +6585,7 @@ function OhlcTab({
                             <span className="text-[#0284c7]">SELECTED</span>
                           ) : isBestCE ? (
                             <span className="text-[#16a34a]">
-                              ★ BEST ₹200–₹300
+                              ★ BEST ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM}
                             </span>
                           ) : ceOk ? (
                             <span className="text-[#16a34a]">✓ IN RANGE</span>
@@ -6666,7 +6662,7 @@ function OhlcTab({
                             <span className="text-[#e11d48]">SELECTED</span>
                           ) : isBestPE ? (
                             <span className="text-[#16a34a]">
-                              ★ BEST ₹200–₹300
+                              ★ BEST ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM}
                             </span>
                           ) : peOk ? (
                             <span className="text-[#16a34a]">✓ IN RANGE</span>
@@ -6697,7 +6693,7 @@ function OhlcTab({
 
           <div className="px-4 py-2 border-t border-[#f1f5f9] bg-[#fafafa] flex items-center justify-between">
             <span className="text-[8px] text-[#94a3b8]" style={MONO}>
-              {displayRows.length} strikes · Green = ₹200–₹300 · ★ = best
+              {displayRows.length} strikes · Green = ₹{SMC_MIN_PREMIUM}–₹{SMC_MAX_PREMIUM} · ★ = best
               opening price · Click to select/deselect
             </span>
             {loadingHist && (

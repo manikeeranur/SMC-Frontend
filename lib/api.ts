@@ -1,3 +1,5 @@
+import { SMC_MIN_PREMIUM } from "./constants";
+
 const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
 
 const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
@@ -84,7 +86,7 @@ export const searchApi = {
 };
 
 export const analysisApi = {
-  scan: (expiry: string, min = 200) =>
+  scan: (expiry: string, min = SMC_MIN_PREMIUM) =>
     req<any>(`/api/analysis/scan/${expiry}?min_premium=${min}`),
   lastScan: () => req<any>("/api/analysis/last-scan"),
   rr: (entry: number) => req<any>(`/api/analysis/rr?entry=${entry}`),

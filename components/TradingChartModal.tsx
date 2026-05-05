@@ -792,6 +792,50 @@ export default function TradingChartModal({
     return () => { ws?.close(); };
   }, [token]);
 
+  // ── 500ms polling: update livePrice + push into current candle ──────────────
+  useEffect(() => {
+    if (!tradingsymbol) return;
+    // Kite quotes API needs "EXCHANGE:TRADINGSYMBOL" format
+    const instrument = isEquity ? `NSE:${tradingsymbol}` : `NFO:${tradingsymbol}`;
+    const poll = async () => {
+      try {
+        const res = await optionsApi.quotes([instrument]);
+        const q = res.quotes[instrument];
+        if (!q?.ltp) return;
+        const price = q.ltp;
+        setLP(price);
+
+        // Push price into current chart candle (same logic as WebSocket handler)
+        const istNow = new Date(Date.now() + 5.5 * 3600 * 1000);
+        const nowEnc = Date.UTC(
+          istNow.getUTCFullYear(), istNow.getUTCMonth(), istNow.getUTCDate(),
+          istNow.getUTCHours(), istNow.getUTCMinutes(), 0,
+        ) / 1000;
+        const tfSec  = tfMinRef.current * 60;
+        const bucket = Math.floor(nowEnc / tfSec) * tfSec;
+        let curr = currentRef.current;
+        if (!curr || curr.time !== bucket) {
+          const prev = curr?.close ?? rawRef.current[rawRef.current.length - 1]?.close ?? price;
+          curr = { time: bucket, open: prev, high: Math.max(prev, price), low: Math.min(prev, price), close: price, volume: curr?.volume ?? 0 };
+        } else {
+          curr = { ...curr, high: Math.max(curr.high, price), low: Math.min(curr.low, price), close: price };
+        }
+        currentRef.current = curr;
+        const s = seriesRef.current;
+        if (!s.main) return;
+        try {
+          if (ctRef.current === "candle" || ctRef.current === "ha")
+            s.main.update({ time: bucket as any, open: curr.open, high: curr.high, low: curr.low, close: curr.close });
+          else
+            s.main.update({ time: bucket as any, value: curr.close });
+        } catch {}
+      } catch {}
+    };
+    poll();
+    const id = setInterval(poll, 500);
+    return () => clearInterval(id);
+  }, [tradingsymbol]);
+
   // ── Indicator toggle (no chart rebuild) ──────────────────────────────────
   function toggleInd(ind: Indicator) {
     const next = new Set(indRef.current);

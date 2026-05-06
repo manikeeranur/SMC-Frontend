@@ -81,7 +81,24 @@ function buildCalendar(year: number, month: number): (number | null)[] {
 }
 
 const LOT_QTY = LOT_SIZE * NUM_LOTS;
-const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 130px 65px";
+const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 155px 90px 65px";
+
+function fmtFull(n: number) {
+  const [int, dec] = Math.abs(n).toFixed(2).split(".");
+  return `${int.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${dec}`;
+}
+
+function calcCharges(entryPrice: number, exitPrice: number, qty: number): number {
+  const turnover  = (entryPrice + exitPrice) * qty;
+  const brokerage = 40;
+  const stt       = exitPrice * qty * 0.000625;
+  const exchange  = turnover * 0.00053;
+  const clearing  = turnover * 0.00003;
+  const gst       = (brokerage + exchange + clearing) * 0.18;
+  const sebi      = turnover * 0.000001;
+  const stamp     = entryPrice * qty * 0.00003;
+  return brokerage + stt + exchange + clearing + gst + sebi + stamp;
+}
 
 export function ResultsContent() {
   const { theme } = useTheme();
@@ -517,7 +534,7 @@ export function ResultsContent() {
                   <div style={{ minWidth: "900px" }}>
                     <div className="grid flex-shrink-0 border-b-2"
                       style={{ gridTemplateColumns: COLS_DESKTOP, borderColor: isDark ? "#1e2a3a" : "#cbd5e1", background: isDark ? "#080d14" : "#f8fafc" }}>
-                      {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,"MAX PTS"].map(h => (
+                      {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,"CHARGES","MAX PTS"].map(h => (
                         <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase"
                           style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{h}</div>
                       ))}
@@ -581,15 +598,35 @@ export function ResultsContent() {
                               <div className="text-[8px] font-bold" style={{ ...MONO, color: stColor }}>{fmtLotPnl(lPnL)}</div>
                             </div>
                             <div className="px-2 py-2.5">
-                              <div className="flex items-baseline gap-1">
-                                <span className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: pnlClr }}>{pnl >= 0 ? "+" : ""}₹{pnl.toFixed(2)}</span>
-                                <span className="text-[7px]" style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>unit</span>
+                              <div className="text-[12px] font-bold tabular-nums leading-tight" style={{ ...MONO, color: pnlClr }}>
+                                {pnl >= 0 ? "+" : "−"}₹{fmtFull(lPnL)}
                               </div>
-                              <div className="flex items-baseline gap-1 mt-0.5">
-                                <span className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: pnlClr }}>{fmtLotPnl(lPnL)}</span>
-                                <span className="text-[7px] font-bold" style={{ ...MONO, color: pnlClr }}>×{LOT_QTY}</span>
+                              <div className="text-[8px] font-bold tabular-nums mt-0.5" style={{ ...MONO, color: pnlClr }}>
+                                ₹{Math.abs(pnl).toFixed(2)} × {LOT_QTY}
                               </div>
                               <div className="text-[8px]" style={{ ...MONO, color: pnlClr }}>{pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(2)}%</div>
+                              {pnl !== 0 && (
+                                <div className="text-[8px] tabular-nums mt-0.5" style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>
+                                  exit ₹{(parseFloat(r.Entry) + pnl).toFixed(2)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="px-2 py-2.5">
+                              {(() => {
+                                const entry   = parseFloat(r.Entry) || 0;
+                                const exitP   = entry + pnl;
+                                const charges = calcCharges(entry, exitP, LOT_QTY);
+                                return (
+                                  <>
+                                    <div className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: "#b45309" }}>
+                                      −₹{fmtFull(charges)}
+                                    </div>
+                                    <div className="text-[7px] mt-0.5" style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>
+                                      incl. STT+GST
+                                    </div>
+                                  </>
+                                );
+                              })()}
                             </div>
                             <div className="px-2 py-2.5">
                               {r.MaxPoints && parseFloat(r.MaxPoints) > 0
@@ -604,20 +641,36 @@ export function ResultsContent() {
                 </div>
                 <div className="flex-shrink-0 border-t"
                   style={{ borderColor: isDark ? "#1e2a3a" : "#cbd5e1", background: isDark ? "#080b0f" : "#fff" }}>
-                  <div className="grid grid-cols-4 sm:grid-cols-7"
+                  <div className="grid grid-cols-4 sm:grid-cols-8"
                     style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#cbd5e1" }}>
                     {[
-                      { label: "TOTAL TRADES", val: `${rows.length}`,              color: isDark ? "#94a3b8" : "#475569" },
-                      { label: "TARGET HIT",   val: `${wins}`,                     color: "#16a34a" },
-                      { label: "SL HIT",       val: `${losses}`,                   color: "#e11d48" },
-                      { label: "EOD / OPEN",   val: `${eod}`,                      color: "#b45309" },
-                      { label: "WIN RATE",     val: winRate ? `${winRate}%` : "—", color: winRate && Number(winRate) >= 70 ? "#16a34a" : "#e11d48" },
-                      { label: "PREMIUM P&L",  val: `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(2)} ₹`, color: pnlColor(totalPnL) },
-                      { label: `LOT P&L (${LOT_QTY}×)`, val: fmtLotPnl(lotPnL), color: pnlColor(lotPnL) },
-                    ].map(({ label, val, color }) => (
+                      { label: "TOTAL TRADES", val: `${rows.length}`,              color: isDark ? "#94a3b8" : "#475569", sub: undefined },
+                      { label: "TARGET HIT",   val: `${wins}`,                     color: "#16a34a",                      sub: undefined },
+                      { label: "SL HIT",       val: `${losses}`,                   color: "#e11d48",                      sub: undefined },
+                      { label: "EOD / OPEN",   val: `${eod}`,                      color: "#b45309",                      sub: undefined },
+                      { label: "WIN RATE",     val: winRate ? `${winRate}%` : "—", color: winRate && Number(winRate) >= 70 ? "#16a34a" : "#e11d48", sub: undefined },
+                      { label: "PREMIUM P&L",  val: `${totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(2)} ₹`, color: pnlColor(totalPnL), sub: undefined },
+                      {
+                        label: "TOTAL CHARGES",
+                        val: `−₹${fmtFull(rows.reduce((sum, r) => {
+                          const entry = parseFloat(r.Entry) || 0;
+                          const pnl   = parseFloat(r.PnL) || 0;
+                          return sum + calcCharges(entry, entry + pnl, LOT_QTY);
+                        }, 0))}`,
+                        color: "#b45309",
+                        sub: "brokerage · STT · GST · NSE",
+                      },
+                      {
+                        label: `LOT P&L (${LOT_QTY}×)`,
+                        val: `${lotPnL >= 0 ? "+" : "−"}₹${fmtFull(lotPnL)}`,
+                        color: pnlColor(lotPnL),
+                        sub: undefined,
+                      },
+                    ].map(({ label, val, color, sub }) => (
                       <div key={label} className="px-3 py-2.5" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
                         <div className="text-[7px] tracking-[1.5px] uppercase mb-1" style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{label}</div>
                         <div className="text-[15px] font-bold leading-tight" style={{ ...MONO, color }}>{val}</div>
+                        {sub && <div className="text-[7px] mt-0.5" style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>{sub}</div>}
                       </div>
                     ))}
                   </div>

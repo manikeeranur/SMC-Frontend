@@ -116,6 +116,7 @@ function OptionsPageInner() {
   const [loading, setLoading] = useState(false);
   const [strikeRange] = useState<5 | 10 | 15 | 30>(30);
   const [live, setLive] = useState(true);
+
   const [activeTab, setActiveTab] = useState<
     "chain" | "smc" | "watchlist" | "ohlc" | "results" | "account"
   >("chain");
@@ -1070,6 +1071,7 @@ function OptionsPageInner() {
               </SelectContent>
             </Select>
           </div>
+
 
           <span
             className="hidden sm:block text-[11px] text-[#ea580c] flex-shrink-0"
@@ -4468,6 +4470,13 @@ function fmtTime(t: string) {
   return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
 }
 
+const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+function fmtExpiry(e: string) {
+  if (!e) return "";
+  const [, m, d] = e.split("-").map(Number);
+  return `${d} ${MONTHS[m - 1]}`;
+}
+
 // ─── SMC TABLE VIEW ────────────────────────────────────────────────────────────
 function SMCTableView({
   alerts,
@@ -4575,6 +4584,23 @@ function SMCTableView({
         ? `${s}₹${(abs / 1000).toFixed(1)}K`
         : `${s}₹${abs.toFixed(0)}`;
   };
+  const fmtFull = (n: number) => {
+    const [int, dec] = Math.abs(n).toFixed(2).split(".");
+    return `${int.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${dec}`;
+  };
+
+  // Zerodha/NSE charges for index options (MIS intraday round-trip)
+  const calcCharges = (entryPrice: number, exitPrice: number, qty: number): number => {
+    const turnover  = (entryPrice + exitPrice) * qty;
+    const brokerage = 40;                               // ₹20 × 2 orders (flat)
+    const stt       = exitPrice * qty * 0.000625;       // 0.0625% on sell side
+    const exchange  = turnover * 0.00053;               // NSE 0.053%
+    const clearing  = turnover * 0.00003;               // 0.003%
+    const gst       = (brokerage + exchange + clearing) * 0.18;
+    const sebi      = turnover * 0.000001;              // ₹10 per crore
+    const stamp     = entryPrice * qty * 0.00003;       // 0.003% on buy side
+    return brokerage + stt + exchange + clearing + gst + sebi + stamp;
+  };
 
   // Overall lot P&L — sum of every trade in the table (realized + unrealized)
   const totalLotPnl = tableAlerts.reduce(
@@ -4586,7 +4612,7 @@ function SMCTableView({
     .reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
 
   const COLS =
-    "40px 60px 1fr 80px 70px 70px 72px 72px 72px 90px 130px 65px 80px";
+    "40px 60px 1fr 150px 70px 70px 72px 72px 72px 90px 155px 80px 65px 80px";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -5389,6 +5415,7 @@ function SMCTableView({
                   "T2",
                   "STATUS",
                   `P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
+                  "CHARGES",
                   "MAX PTS",
                   "",
                 ].map((h) => (
@@ -5553,10 +5580,10 @@ function SMCTableView({
                       {/* STRIKE */}
                       <div className="px-2 py-2.5">
                         <div
-                          className="text-[11px] font-bold"
+                          className="text-[10px] font-bold leading-tight whitespace-nowrap"
                           style={{ ...MONO, color: dirColor }}
                         >
-                          {a.strike} {a.direction}
+                          NIFTY {fmtExpiry(a.expiry)} {a.strike} {a.direction}
                         </div>
                         <div className="text-[8px] text-[#94a3b8]" style={MONO}>
                           spot {a.spot?.toFixed(0)}
@@ -5730,46 +5757,54 @@ function SMCTableView({
                         )}
                       </div>
 
-                      {/* P&L per unit + lot */}
+                      {/* P&L — full amount, large screen */}
                       <div className="px-2 py-2.5">
-                        {/* per-unit */}
-                        <div className="flex items-baseline gap-1">
-                          <span
-                            className="text-[11px] font-bold tabular-nums"
-                            style={{ ...MONO, color: pnlColor }}
-                          >
-                            {pnlUp ? "+" : ""}₹
-                            {a.currentPnL?.toFixed(2) ?? "0.00"}
-                          </span>
-                          <span
-                            className="text-[7px] text-[#94a3b8]"
-                            style={MONO}
-                          >
-                            unit
-                          </span>
+                        <div
+                          className="text-[12px] font-bold tabular-nums leading-tight"
+                          style={{ ...MONO, color: pnlColor }}
+                        >
+                          {pnlUp ? "+" : "−"}₹{fmtFull((a.currentPnL ?? 0) * LOT_QTY)}
                         </div>
-                        {/* lot P&L = unit × LOT_SIZE */}
-                        <div className="flex items-baseline gap-1 mt-0.5">
-                          <span
-                            className="text-[12px] font-bold tabular-nums"
-                            style={{ ...MONO, color: pnlColor }}
-                          >
-                            {fmtLotPnl((a.currentPnL ?? 0) * LOT_QTY)}
-                          </span>
-                          <span
-                            className="text-[7px] font-bold"
-                            style={{ ...MONO, color: pnlColor }}
-                          >
-                            ×{LOT_QTY}
-                          </span>
+                        <div
+                          className="text-[8px] font-bold tabular-nums mt-0.5"
+                          style={{ ...MONO, color: pnlColor }}
+                        >
+                          ₹{Math.abs(a.currentPnL ?? 0).toFixed(2)} × {LOT_QTY}
                         </div>
                         <div
                           className="text-[8px]"
                           style={{ ...MONO, color: pnlColor }}
                         >
-                          {pnlUp ? "+" : ""}
-                          {a.pnlPct?.toFixed(2) ?? "0.00"}%
+                          {pnlUp ? "+" : ""}{a.pnlPct?.toFixed(2) ?? "0.00"}%
                         </div>
+                        {a.status !== "ACTIVE" && (a.currentPnL ?? 0) !== 0 && (
+                          <div
+                            className="text-[8px] tabular-nums mt-0.5"
+                            style={{ ...MONO, color: "#64748b" }}
+                          >
+                            exit ₹{((a.rr?.entry ?? 0) + (a.currentPnL ?? 0)).toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* CHARGES */}
+                      <div className="px-2 py-2.5">
+                        {(() => {
+                          const entry    = a.rr?.entry ?? 0;
+                          const exitP    = a.status === "ACTIVE" ? (a.lastLtp ?? entry) : entry + (a.currentPnL ?? 0);
+                          const charges  = calcCharges(entry, exitP, LOT_QTY);
+                          const isEst    = a.status === "ACTIVE";
+                          return (
+                            <>
+                              <div className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: "#b45309" }}>
+                                −₹{fmtFull(charges)}
+                              </div>
+                              <div className="text-[7px] mt-0.5" style={{ ...MONO, color: "#94a3b8" }}>
+                                {isEst ? "est." : "incl. STT+GST"}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
 
                       {/* MAX PTS */}
@@ -5843,32 +5878,41 @@ function SMCTableView({
             </div>
           )}
           <div
-            className="grid grid-cols-4 sm:grid-cols-7"
+            className="grid grid-cols-4 sm:grid-cols-8"
             style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#cbd5e1" }}
           >
             {[
-              {
-                label: "TOTAL SIGNALS",
-                val: `${tableAlerts.length}`,
-                color: "#475569",
-              },
-              { label: "ACTIVE", val: `${active}`, color: "#0284c7" },
-              { label: "TARGET HIT", val: `${wins}`, color: "#16a34a" },
-              { label: "SL HIT", val: `${losses}`, color: "#e11d48" },
-              { label: "EOD / OPEN", val: `${eod}`, color: "#b45309" },
+              { label: "TOTAL SIGNALS", val: `${tableAlerts.length}`, color: "#475569" },
+              { label: "ACTIVE",        val: `${active}`,              color: "#0284c7" },
+              { label: "TARGET HIT",    val: `${wins}`,                color: "#16a34a" },
+              { label: "SL HIT",        val: `${losses}`,              color: "#e11d48" },
+              { label: "EOD / OPEN",    val: `${eod}`,                 color: "#b45309" },
               {
                 label: "WIN RATE",
-                val: wr ? `${wr}%` : "—",
+                val:   wr ? `${wr}%` : "—",
                 color: wr && Number(wr) >= 70 ? "#16a34a" : "#e11d48",
               },
               {
+                label: "TOTAL CHARGES",
+                val: tableAlerts.length > 0
+                  ? `−₹${fmtFull(tableAlerts.reduce((sum, a) => {
+                      const entry = a.rr?.entry ?? 0;
+                      const exitP = a.status === "ACTIVE" ? (a.lastLtp ?? entry) : entry + (a.currentPnL ?? 0);
+                      return sum + calcCharges(entry, exitP, LOT_QTY);
+                    }, 0))}`
+                  : "—",
+                color: "#b45309",
+                sub: "brokerage · STT · GST · NSE",
+              },
+              {
                 label: `LOT P&L (${LOT_QTY}×)`,
-                val: tableAlerts.length > 0 ? fmtLotPnl(totalLotPnl) : "—",
+                val: tableAlerts.length > 0
+                  ? `${totalLotPnl >= 0 ? "+" : "−"}₹${fmtFull(totalLotPnl)}`
+                  : "—",
                 color: totalLotPnl >= 0 ? "#16a34a" : "#e11d48",
-                sub:
-                  active > 0
-                    ? `realized ${fmtLotPnl(realizedLotPnl)}`
-                    : undefined,
+                sub: active > 0
+                  ? `realized ${totalLotPnl >= 0 ? "+" : "−"}₹${fmtFull(realizedLotPnl)}`
+                  : undefined,
               },
             ].map(({ label, val, color, sub }: any) => (
               <div key={label} className="bg-white px-3 py-2.5">

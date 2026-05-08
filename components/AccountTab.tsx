@@ -196,10 +196,11 @@ function IndexLogo({ symbol, optType }: { symbol: string; optType: "CE" | "PE" }
 }
 
 // ─── Position card — exact Zerodha/Kite style ────────────────────────────────
-function PositionCard({ p, onExit, isExiting }: {
+function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
   p: Position;
   onExit?: () => void;
   isExiting?: boolean;
+  defaultLockPts?: number | null;
 }) {
   const { theme } = useTheme();
   const isDark  = theme === "dark";
@@ -251,6 +252,12 @@ function PositionCard({ p, onExit, isExiting }: {
   const [slSet,      setSlSet]      = useState<number | null>(null);
   const [tpSet,      setTpSet]      = useState<number | null>(null);
 
+  // Lock Points state
+  const [lockInput,  setLockInput]  = useState("");
+  const [lockSet,    setLockSet]    = useState<number | null>(null);
+  const [lockDir,    setLockDir]    = useState<"up" | "down" | null>(null);
+  const lockTarget = lockSet !== null && p.buyPrice > 0 ? p.buyPrice + lockSet : null;
+
   function confirmSLTP() {
     const sl = parseFloat(slInput);
     const tp = parseFloat(tpInput);
@@ -259,31 +266,61 @@ function PositionCard({ p, onExit, isExiting }: {
     setShowSLTP(false);
   }
 
+  function applyLockPoints() {
+    const pts = parseFloat(lockInput);
+    if (!isNaN(pts) && pts > 0) {
+      const target = p.buyPrice + pts;
+      // CMP above lock target → price must fall DOWN to trigger
+      // CMP below lock target → price must rise UP to trigger
+      setLockDir(p.currentPrice >= target ? "down" : "up");
+      setLockSet(pts);
+    }
+  }
+
   const displayName  = formatSymbol(p.tradingsymbol);
   const days         = daysLeft();
   const triggeredRef = useRef(false);
   const onExitRef    = useRef(onExit);
   useEffect(() => { onExitRef.current = onExit; }, [onExit]);
 
-  // ── Auto-exit when price hits SL or TP ──────────────────────────────────────
+  // ── Auto-exit when price hits SL, TP, or Lock Target ───────────────────────
   useEffect(() => {
     if (!isOpen || triggeredRef.current) return;
     const cmp = p.currentPrice;
     if (cmp <= 0) return;
 
-    const hitSL = slSet !== null && cmp <= slSet;
-    const hitTP = tpSet !== null && cmp >= tpSet;
+    const hitSL   = slSet      !== null && cmp <= slSet;
+    const hitTP   = tpSet      !== null && cmp >= tpSet;
+    const hitLock = lockTarget !== null && (
+      lockDir === "down" ? cmp <= lockTarget   // profit case: price fell back to lock level
+                         : cmp >= lockTarget   // loss case: price recovered up to lock level
+    );
 
-    if ((hitSL || hitTP) && onExitRef.current) {
+    if ((hitSL || hitTP || hitLock) && onExitRef.current) {
       triggeredRef.current = true;
       onExitRef.current();
     }
   // onExit intentionally excluded — use ref to avoid re-running on every render
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.currentPrice, slSet, tpSet, isOpen]);
+  }, [p.currentPrice, slSet, tpSet, lockTarget, isOpen]);
 
-  // Reset trigger flag when SL/TP values are changed
-  useEffect(() => { triggeredRef.current = false; }, [slSet, tpSet]);
+  // Reset trigger flag when SL/TP/Lock values are changed
+  useEffect(() => { triggeredRef.current = false; }, [slSet, tpSet, lockSet, lockDir]);
+
+  // Apply default lock points from global toggle
+  useEffect(() => {
+    if (defaultLockPts != null && defaultLockPts > 0 && p.buyPrice > 0) {
+      const target = p.buyPrice + defaultLockPts;
+      setLockDir(p.currentPrice >= target ? "down" : "up");
+      setLockSet(defaultLockPts);
+      setLockInput(String(defaultLockPts));
+    } else if (defaultLockPts == null) {
+      setLockSet(null);
+      setLockDir(null);
+      setLockInput("");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultLockPts]);
 
   // 2 × 3 detail grid rows
   const gridRows = [
@@ -359,6 +396,39 @@ function PositionCard({ p, onExit, isExiting }: {
         </div>
       </div>
 
+      {/* ── Lock Points input (open trades only) ── */}
+      {isOpen && (
+        <div className="mx-3 mb-2 rounded-xl px-3 py-2 flex items-center gap-2"
+          style={{ background: isDark ? "#1a1f35" : "#f0f1ff", border: `1px solid #6366f130` }}>
+          <span className="text-[10px] font-bold flex-shrink-0" style={{ color: "#6366f1" }}>
+            🔒 Lock Pts
+          </span>
+          <input
+            type="number"
+            min="1"
+            value={lockInput}
+            onChange={e => setLockInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && applyLockPoints()}
+            placeholder="e.g. 10"
+            className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold outline-none min-w-0"
+            style={{ background: isDark ? "#0f172a" : "#fff", color: text,
+                     border: `1px solid #6366f140`, ...MONO }}
+          />
+          {p.buyPrice > 0 && lockInput && !isNaN(parseFloat(lockInput)) && parseFloat(lockInput) > 0 && (
+            <span className="text-[10px] font-bold flex-shrink-0 whitespace-nowrap" style={{ color: "#6366f1" }}>
+              → ₹{fmt(p.buyPrice + parseFloat(lockInput))}
+            </span>
+          )}
+          <button
+            onClick={applyLockPoints}
+            disabled={!lockInput || isNaN(parseFloat(lockInput)) || parseFloat(lockInput) <= 0}
+            className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white flex-shrink-0 disabled:opacity-40"
+            style={{ background: "#6366f1" }}>
+            Set
+          </button>
+        </div>
+      )}
+
       {/* ── More details chevron toggle ── */}
       <button
         onClick={() => setShowDetail(v => !v)}
@@ -394,8 +464,8 @@ function PositionCard({ p, onExit, isExiting }: {
         </div>
       )}
 
-      {/* ── SL/TP chips ── */}
-      {(slSet !== null || tpSet !== null) && (
+      {/* ── SL/TP/Lock chips ── */}
+      {(slSet !== null || tpSet !== null || lockTarget !== null) && (
         <div className="flex items-center gap-2 px-3 pb-3 flex-wrap">
           {/* monitoring badge */}
           <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold"
@@ -416,6 +486,14 @@ function PositionCard({ p, onExit, isExiting }: {
               style={{ background: "#16a34a15", color: "#16a34a" }}>
               TP ₹{fmt(tpSet)}
               <button onClick={() => { setTpSet(null); triggeredRef.current = false; }}
+                className="ml-0.5 opacity-60 hover:opacity-100">×</button>
+            </span>
+          )}
+          {lockTarget !== null && (
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
+              style={{ background: "#6366f115", color: "#6366f1" }}>
+              🔒 +{lockSet}pts → ₹{fmt(lockTarget)}
+              <button onClick={() => { setLockSet(null); setLockDir(null); setLockInput(""); triggeredRef.current = false; }}
                 className="ml-0.5 opacity-60 hover:opacity-100">×</button>
             </span>
           )}
@@ -656,6 +734,26 @@ export function AccountTab() {
   const [exitAllBusy,   setExitAllBusy]   = useState(false);
   const [exitError,     setExitError]     = useState("");
   const [activeModal,   setActiveModal]   = useState<"wallet" | "charges" | "pnl" | null>(null);
+
+  // Global lock points
+  const [globalLockOn,    setGlobalLockOn]    = useState(false);
+  const [globalLockInput, setGlobalLockInput] = useState("");
+  const [globalLockPts,   setGlobalLockPts]   = useState<number | null>(null);
+
+  function applyGlobalLock() {
+    const pts = parseFloat(globalLockInput);
+    if (!isNaN(pts) && pts > 0) setGlobalLockPts(pts);
+  }
+
+  function toggleGlobalLock() {
+    if (globalLockOn) {
+      setGlobalLockOn(false);
+      setGlobalLockPts(null);
+      setGlobalLockInput("");
+    } else {
+      setGlobalLockOn(true);
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -1115,7 +1213,7 @@ export function AccountTab() {
           </div>
 
           {/* ── Positions header ── */}
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold tracking-[1.5px] uppercase" style={{ ...MONO, color: subtext }}>
                 Today's Positions
@@ -1145,6 +1243,55 @@ export function AccountTab() {
             </div>
           </div>
 
+          {/* ── Global lock points toggle row ── */}
+          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl"
+            style={{ background: isDark ? "#0f172a" : "#f8f8ff", border: `1px solid ${globalLockOn ? "#6366f140" : (isDark ? "#1e293b" : "#e2e8f0")}` }}>
+            {/* Toggle button */}
+            <button
+              onClick={toggleGlobalLock}
+              className="flex items-center gap-1.5 flex-shrink-0"
+            >
+              <div className="relative w-8 h-4 rounded-full transition-colors duration-200"
+                style={{ background: globalLockOn ? "#6366f1" : (isDark ? "#334155" : "#cbd5e1") }}>
+                <div className="absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform duration-200"
+                  style={{ transform: globalLockOn ? "translateX(18px)" : "translateX(2px)" }} />
+              </div>
+              <span className="text-[9px] font-bold" style={{ color: globalLockOn ? "#6366f1" : subtext }}>
+                🔒 Lock All
+              </span>
+            </button>
+
+            {/* Input + Set — visible only when toggle is ON */}
+            {globalLockOn && (
+              <>
+                <input
+                  type="number"
+                  min="1"
+                  value={globalLockInput}
+                  onChange={e => setGlobalLockInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && applyGlobalLock()}
+                  placeholder="pts e.g. 10"
+                  className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold outline-none min-w-0"
+                  style={{ background: isDark ? "#1e293b" : "#fff", color: text,
+                           border: `1px solid #6366f140`, ...MONO }}
+                />
+                <button
+                  onClick={applyGlobalLock}
+                  disabled={!globalLockInput || isNaN(parseFloat(globalLockInput)) || parseFloat(globalLockInput) <= 0}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white flex-shrink-0 disabled:opacity-40"
+                  style={{ background: "#6366f1" }}>
+                  Set All
+                </button>
+                {globalLockPts !== null && (
+                  <span className="text-[9px] font-bold flex-shrink-0 whitespace-nowrap px-2 py-1 rounded-lg"
+                    style={{ background: "#6366f115", color: "#6366f1" }}>
+                    +{globalLockPts} pts active
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+
           {exitError && (
             <div className="mb-3 px-3 py-2 rounded-lg text-[10px]"
               style={{ background: "#e11d4815", border: "1px solid #e11d4840", ...MONO, color: "#e11d48" }}>
@@ -1166,6 +1313,7 @@ export function AccountTab() {
                   p={p}
                   onExit={p.status === "OPEN" ? () => handleExit(p.tradingsymbol, p.quantity) : undefined}
                   isExiting={exitingSet.has(p.tradingsymbol)}
+                  defaultLockPts={globalLockOn ? globalLockPts : null}
                 />
               ))}
             </div>

@@ -286,6 +286,7 @@ function OptionsPageInner() {
   }, [activeTab, hydrated]);
 
   const tickRef = useRef<ReturnType<typeof setInterval>>();
+  const wsRef   = useRef<WebSocket | null>(null);
   // 1-min candle closes per option token → for RSI(14) on watchlist
   const priceHistRef = useRef<
     Record<number, { closes: number[]; lastKey: number }>
@@ -366,11 +367,34 @@ function OptionsPageInner() {
     const ws = createWS((msg) => {
       if (msg.type === "scan_result") {
         if (msg.active) setActiveTab("smc");
-        fetchSMCAlerts(); // refresh CMP + peakMove on every backend scan
+        fetchSMCAlerts();
       }
       if (msg.type === "status") setAuthenticated(msg.authenticated);
+
+      // Live tick stream — update all option chain prices instantly
+      if (msg.type === "ticks" && Array.isArray(msg.data)) {
+        const tickMap: Record<number, number> = {};
+        (msg.data as any[]).forEach((t: any) => {
+          if (t.instrument_token && t.last_price) tickMap[t.instrument_token] = t.last_price;
+        });
+        if (Object.keys(tickMap).length === 0) return;
+
+        setData(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            rows: prev.rows.map(r => ({
+              ...r,
+              ce: tickMap[r.ce.token] != null ? { ...r.ce, ltp: tickMap[r.ce.token] } : r.ce,
+              pe: tickMap[r.pe.token] != null ? { ...r.pe, ltp: tickMap[r.pe.token] } : r.pe,
+            })),
+          };
+        });
+      }
     });
-    return () => ws?.close();
+
+    wsRef.current = ws;
+    return () => { ws?.close(); wsRef.current = null; };
   }, [authenticated]);
 
   // ── Refresh option chain ────────────────────────────────────────────────────
@@ -460,6 +484,13 @@ function OptionsPageInner() {
         trackCandle(r.ce.token, r.ce.ltp);
         trackCandle(r.pe.token, r.pe.ltp);
       });
+
+      // Subscribe all chain tokens for live tick streaming
+      if (wsRef.current?.readyState === 1) {
+        const chainTokens = d.rows.flatMap(r => [r.ce.token, r.pe.token]).filter(Boolean);
+        wsRef.current.send(JSON.stringify({ type: "subscribe", tokens: chainTokens }));
+      }
+
       setWatchlist((prev) =>
         prev.map((w) => {
           const row = d.rows.find((r) => r.strike === w.leg.strike);

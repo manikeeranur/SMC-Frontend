@@ -51,6 +51,7 @@ import {
 } from "@/components/ui/select";
 import { ResultsContent } from "@/components/ResultsContent";
 import { AccountTab } from "@/components/AccountTab";
+import { TradingJournalContent } from "@/components/TradingJournalContent";
 import TradingChartModal from "@/components/TradingChartModal";
 import WatchlistCombobox, { type SearchResult } from "@/components/WatchlistCombobox";
 import IndexSwiper from "@/components/IndexSwiper";
@@ -70,6 +71,7 @@ import {
   IconPlus,
   IconCheck,
   IconTrash,
+  IconNotebook,
 } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
@@ -118,7 +120,7 @@ function OptionsPageInner() {
   const [live, setLive] = useState(true);
 
   const [activeTab, setActiveTab] = useState<
-    "chain" | "smc" | "watchlist" | "ohlc" | "results" | "account"
+    "chain" | "smc" | "watchlist" | "ohlc" | "results" | "account" | "journal"
   >("chain");
   type WlistGroup = { id: string; name: string; items: WatchedOption[] };
   const [wlistGroups, setWlistGroups] = useState<WlistGroup[]>([{ id: "wl_default", name: "My Watchlist", items: [] }]);
@@ -153,9 +155,12 @@ function OptionsPageInner() {
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
   const [autoPositions, setAutoPositions] = useState<any[]>([]);
   const [candles3m, setCandles3m] = useState<Record<number, any[]>>({});
+  const [alertPopup, setAlertPopup] = useState<any | null>(null);
+  const alertPopupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dragIdxRef = useRef<number | null>(null);
   const chainScrollRef = useRef<HTMLDivElement>(null);
   const atmRowRef = useRef<HTMLDivElement>(null);
+  const knownAlertIds = useRef<Set<string>>(new Set());
   const [authenticated, setAuthenticated] = useState(isDemoMode);
   const [liveUser, setLiveUser] = useState(kiteUser);
   const [tokenCopied, setTokenCopied] = useState(false);
@@ -225,6 +230,10 @@ function OptionsPageInner() {
       setAuthenticated(true);
       const u = localStorage.getItem("kite_user");
       if (u) setLiveUser(u);
+      // Ask for notification permission once the user is confirmed logged-in
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
     }
     // Load watchlists: localStorage first (always up-to-date), then sync MongoDB in background
     try {
@@ -256,6 +265,7 @@ function OptionsPageInner() {
       | "watchlist"
       | "ohlc"
       | "results"
+      | "journal"
       | null;
     if (savedTab) setActiveTab(savedTab);
     setHydrated(true);
@@ -332,6 +342,9 @@ function OptionsPageInner() {
       if (kiteUser) localStorage.setItem("kite_user", kiteUser);
       window.history.replaceState({}, "", "/options");
       setTimeout(() => setJustLoggedIn(false), 2200);
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
       return;
     }
     authApi
@@ -569,12 +582,97 @@ function OptionsPageInner() {
     setLiveUser("");
   }
 
+  function requestNotificationPermission() {
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }
+
+  function playAlertSound() {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      [[880, 0, 0.15], [1100, 0.18, 0.15], [880, 0.36, 0.2]].forEach(([freq, start, dur]) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0, ctx.currentTime + start);
+        gain.gain.linearRampToValueAtTime(0.35, ctx.currentTime + start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + dur + 0.05);
+      });
+    } catch {}
+  }
+
+  function sendOSNotification(alert: any) {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    try {
+      const emoji    = alert.direction === "CE" ? "📈" : "📉";
+      const strength = alert.strength ? ` · ${alert.strength}` : "";
+      const score    = alert.score != null ? ` · Score ${alert.score}/5` : "";
+      const spot     = alert.spot ? ` · Spot ${alert.spot.toFixed(0)}` : "";
+      const concepts = (alert.concepts ?? []).join(" + ");
+      const body = [
+        `Entry  ₹${alert.rr?.entry?.toFixed(2)}`,
+        `Target1  ₹${alert.rr?.target1?.toFixed(2)}`,
+        `Target2  ₹${alert.rr?.target2?.toFixed(2)}`,
+        `SL  ₹${alert.rr?.sl?.toFixed(2)}`,
+        concepts,
+        `${strength}${score}${spot}`.replace(/^ · /, ""),
+      ].filter(Boolean).join("\n");
+      const n = new Notification(`${emoji} SMC Alert — NIFTY ${alert.strike} ${alert.direction}`, {
+        body,
+        icon: "/favicon.ico",
+        tag:  alert.id,
+        requireInteraction: true,   // stays until user dismisses — important for alerts
+      });
+      setTimeout(() => n.close(), 15_000);
+    } catch {}
+  }
+
+  function sendSystemOSNotification(title: string, body: string) {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission !== "granted") return;
+    try {
+      const n = new Notification(title, { body, icon: "/favicon.ico", tag: title, requireInteraction: false });
+      setTimeout(() => n.close(), 6000);
+    } catch {}
+  }
+
+  function showPopup(data: any) {
+    if (alertPopupTimer.current) clearTimeout(alertPopupTimer.current);
+    setAlertPopup(data);
+    const dur = data._isSystem ? 5000 : 8000;
+    alertPopupTimer.current = setTimeout(() => setAlertPopup(null), dur);
+  }
+
+  function fireAlertNotifications(newAlerts: any[]) {
+    if (!newAlerts.length) return;
+    playAlertSound();
+    newAlerts.forEach(sendOSNotification);
+    showPopup(newAlerts[0]);
+  }
+
   async function fetchSMCAlerts() {
     const e = niftyExpiry || expiry;
     if (!e || isDemoMode || !authenticated) return;
     try {
       const r = (await smcApi.alerts(e)) as any;
       const alerts = r.alerts ?? [];
+
+      // Sound + OS notification + popup on new ACTIVE alerts
+      const newActive = alerts.filter((a: any) =>
+        a.status === "ACTIVE" && !knownAlertIds.current.has(a.id)
+      );
+      if (newActive.length > 0 && knownAlertIds.current.size > 0) {
+        fireAlertNotifications(newActive);
+      }
+      alerts.forEach((a: any) => knownAlertIds.current.add(a.id));
+
       setSmcAlerts(alerts);
       setSmcWinRate(r.winRate ?? null);
     } catch {}
@@ -658,6 +756,28 @@ function OptionsPageInner() {
     const t = setInterval(fetchSMCAlerts, 1000);
     return () => clearInterval(t);
   }, [authenticated, activeTab, niftyExpiry, expiry]);
+
+  // ── Test notification: show "Bot Connected + Scanner Running" 30s after login
+  useEffect(() => {
+    if (!authenticated) return;
+    const t = setTimeout(() => {
+      // OS notifications
+      sendSystemOSNotification(
+        "✅ Algo Bot Connected",
+        "Kite session active · SMC scanner is running\nYou will be notified when a signal fires."
+      );
+      setTimeout(() => {
+        sendSystemOSNotification(
+          "🔍 Scanner Running Successfully",
+          "SMC scanner is live · Watching NIFTY options every minute from 09:21 AM"
+        );
+      }, 1500);
+      // In-app popup (system style)
+      showPopup({ _isSystem: true, title: "Algo Bot Connected", subtitle: "Scanner running successfully · Watching NIFTY from 09:21 AM" });
+    }, 30_000);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated]);
 
   // Poll auto-trade status every 10s when on SMC tab
   useEffect(() => {
@@ -1013,6 +1133,89 @@ function OptionsPageInner() {
       className="flex flex-col h-screen bg-[#f0f4f8] overflow-hidden"
       style={{ fontFamily: "'DM Sans',sans-serif" }}
     >
+      {/* ══ ALERT POPUP BANNER ══ */}
+      {alertPopup && (() => {
+        const dismiss = () => { setAlertPopup(null); if (alertPopupTimer.current) clearTimeout(alertPopupTimer.current); };
+
+        /* ── System message (bot connected / scanner running) ── */
+        if (alertPopup._isSystem) return (
+          <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 9999, minWidth: 300, maxWidth: 420, background: "#f0fdf4", border: "2px solid #16a34a", borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: "14px 18px 12px", animation: "slideDown 0.25s ease" }}>
+            <style>{`@keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-20px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 text-[22px]" style={{ background: "#dcfce7", border: "1.5px solid #86efac" }}>✅</div>
+                <div>
+                  <div className="text-[14px] font-bold" style={{ ...MONO, color: "#15803d" }}>{alertPopup.title}</div>
+                  <div className="text-[10px] mt-0.5" style={{ ...MONO, color: "#16a34a" }}>{alertPopup.subtitle}</div>
+                </div>
+              </div>
+              <button onClick={dismiss} className="text-[16px] text-[#94a3b8] cursor-pointer leading-none flex-shrink-0" style={{ marginTop: -2 }}>×</button>
+            </div>
+          </div>
+        );
+
+        /* ── Trade alert popup ── */
+        const isCE = alertPopup.direction === "CE";
+        const clr  = isCE ? "#0284c7" : "#e11d48";
+        const bg   = isCE ? "#eff6ff" : "#fff1f2";
+        return (
+          <div style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 9999, minWidth: 340, maxWidth: 480, background: bg, border: `2px solid ${clr}`, borderRadius: 12, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: "14px 18px 14px", animation: "slideDown 0.25s ease" }}>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3 flex-1 min-w-0">
+                {/* Direction badge */}
+                <div className="w-11 h-11 rounded-xl flex flex-col items-center justify-center flex-shrink-0" style={{ background: `${clr}18`, border: `1.5px solid ${clr}50` }}>
+                  <span className="text-[7px] font-bold" style={{ ...MONO, color: "#64748b" }}>NI</span>
+                  <span className="text-[14px] font-bold" style={{ ...BEBAS, color: clr }}>{alertPopup.direction}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  {/* Title row */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[16px] font-bold leading-tight" style={{ ...BEBAS, color: "#1e293b" }}>
+                      NIFTY {alertPopup.strike} {isCE ? "Call" : "Put"}
+                    </span>
+                    {alertPopup.strength && (
+                      <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm" style={{ ...MONO, background: `${clr}18`, color: clr, border: `1px solid ${clr}40` }}>{alertPopup.strength}</span>
+                    )}
+                    {alertPopup.score != null && (
+                      <span className="text-[8px] font-bold" style={{ ...MONO, color: "#64748b" }}>{alertPopup.score}/5</span>
+                    )}
+                  </div>
+                  {/* Entry time + spot */}
+                  <div className="text-[9px] mt-0.5" style={{ ...MONO, color: "#64748b" }}>
+                    {alertPopup.entryTime && <span>{alertPopup.entryTime}</span>}
+                    {alertPopup.spot ? <span>  ·  Spot {alertPopup.spot.toFixed(0)}</span> : null}
+                    {alertPopup.trendOk && <span className="text-[#16a34a]">  ·  +EMA✓</span>}
+                  </div>
+                  {/* Prices grid */}
+                  <div className="grid grid-cols-4 gap-2 mt-2">
+                    {[
+                      { label: "ENTRY",   val: alertPopup.rr?.entry?.toFixed(2),   color: clr },
+                      { label: "TARGET 1", val: alertPopup.rr?.target1?.toFixed(2), color: "#16a34a" },
+                      { label: "TARGET 2", val: alertPopup.rr?.target2?.toFixed(2), color: "#15803d" },
+                      { label: "SL",      val: alertPopup.rr?.sl?.toFixed(2),       color: "#e11d48" },
+                    ].map(({ label, val, color }) => (
+                      <div key={label} className="text-center rounded-lg py-1.5 px-1" style={{ background: `${color}12`, border: `1px solid ${color}30` }}>
+                        <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#94a3b8" }}>{label}</div>
+                        <div className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color }}>₹{val ?? "—"}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Concepts */}
+                  {(alertPopup.concepts ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2">
+                      {alertPopup.concepts.map((c: string) => (
+                        <span key={c} className="text-[7px] px-1.5 py-0.5 rounded-sm font-bold" style={{ ...MONO, background: `${clr}14`, color: clr, border: `1px solid ${clr}30` }}>{c}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <button onClick={dismiss} className="text-[18px] text-[#94a3b8] cursor-pointer leading-none flex-shrink-0" style={{ marginTop: -2 }}>×</button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ══ HEADER ══ */}
       <header
         className="flex items-center px-3 md:px-5 h-[52px] flex-shrink-0 gap-3"
@@ -1224,6 +1427,11 @@ function OptionsPageInner() {
                 tab: "results",
                 icon: <IconFileAnalytics size={20} />,
                 label: "Results",
+              },
+              {
+                tab: "journal",
+                icon: <IconNotebook size={20} />,
+                label: "Journal",
               },
             ] as const
           ).map(({ tab, icon, label, badge }: any) => (
@@ -2220,6 +2428,9 @@ function OptionsPageInner() {
 
           {/* ── ACCOUNT ── */}
           {activeTab === "account" && <AccountTab />}
+
+          {/* ── JOURNAL ── */}
+          {activeTab === "journal" && <TradingJournalContent />}
         </div>
       </div>
 
@@ -2309,6 +2520,16 @@ function OptionsPageInner() {
           <IconFileAnalytics size={22} />
           <span className="text-[8px]" style={MONO}>
             Results
+          </span>
+        </button>
+        <button
+          onClick={() => { setActiveTab("journal"); setChartTarget(null); }}
+          className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "journal" ? "#ea580c" : "#94a3b8" }}
+        >
+          <IconNotebook size={22} />
+          <span className="text-[8px]" style={MONO}>
+            Journal
           </span>
         </button>
       </nav>

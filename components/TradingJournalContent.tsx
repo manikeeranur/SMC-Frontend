@@ -447,8 +447,8 @@ function ChartsPanel({
 type Row = Record<string, string>;
 
 const STATUS_COLOR: Record<string, string> = {
-  TARGET: "#22c55e", TIME_PROFIT: "#86efac", SL: "#ef4444",
-  TIME_EXIT: "#f97316", EOD: "#94a3b8", ACTIVE: "#60a5fa",
+  TARGET: "#22c55e", TIME_PROFIT: "#22c55e", SL: "#ef4444",
+  TIME_EXIT: "#ef4444", EOD: "#94a3b8", ACTIVE: "#60a5fa",
 };
 
 function dirColor(d: string) { return d === "CE" ? "#0284c7" : "#e11d48"; }
@@ -574,8 +574,8 @@ function JournalTradesSection({ isDark, border, color, muted }: {
     return true;
   }), [allRows, monthFilter, dirFilter, resFilter, maxPtsFilter]);
 
-  const wins    = filtered.filter(r => r.Status === "TARGET" || r.Status === "TIME_PROFIT").length;
-  const losses  = filtered.filter(r => r.Status === "SL"     || r.Status === "TIME_EXIT").length;
+  const wins    = filtered.filter(r => r.Status === "TARGET" || r.Status === "TIME_PROFIT" || (r.Status === "TIME_EXIT" && (parseFloat(r.PnL) || 0) >= 0)).length;
+  const losses  = filtered.filter(r => r.Status === "SL" || (r.Status === "TIME_EXIT" && (parseFloat(r.PnL) || 0) < 0)).length;
   const eod     = filtered.filter(r => r.Status === "EOD").length;
   const closed  = wins + losses;
   const wr      = closed > 0 ? ((wins / closed) * 100).toFixed(1) : null;
@@ -800,7 +800,7 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                   {wr}% · <span style={{ color: "#16a34a" }}>{wins}W</span> / <span style={{ color: "#e11d48" }}>{losses}L</span>{eod > 0 ? ` · ${eod}E` : ""}
                 </span>
                 <span className="text-[15px] font-bold" style={{ ...BEBAS, color: pnlColor(lotPnL) }}>
-                  {lotPnL >= 0 ? "+" : "−"}₹{fmtIndianFull(Math.abs(lotPnL))}
+                  {fmtIndianFull(lotPnL)}
                 </span>
               </div>
             )}
@@ -839,14 +839,15 @@ function JournalTradesSection({ isDark, border, color, muted }: {
             const pnl    = parseFloat(r.PnL) || 0;
             const lPnl   = pnl * LOT_QTY;
             const dc     = dirColor(r.Direction);
-            const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT";
-            const isLoss = r.Status === "SL"     || r.Status === "TIME_EXIT";
+            const isTimedExit = r.Status === "TIME_EXIT";
+            const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT" || (isTimedExit && pnl >= 0);
+            const isLoss = r.Status === "SL" || (isTimedExit && pnl < 0);
             const isEod  = r.Status === "EOD";
-            const sc     = STATUS_COLOR[r.Status] ?? "#94a3b8";
+            const sc     = isTimedExit ? (pnl >= 0 ? "#22c55e" : "#ef4444") : STATUS_COLOR[r.Status] ?? "#94a3b8";
             const t1Hit  = r.T1Hit === "Y";
             const t2Hit  = r.Status === "TARGET";
-            const stIcon = r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : r.Status === "EOD" ? "🕐" : "⏳";
-            const stLbl  = r.Status === "TIME_PROFIT" ? "T-PROFIT" : r.Status === "TIME_EXIT" ? "T-EXIT" : r.Status;
+            const stIcon = r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : r.Status === "EOD" ? "🕐" : r.Status === "TIME_PROFIT" || isTimedExit ? "⏱" : "⏳";
+            const stLbl  = r.Status === "TIME_PROFIT" ? "60M PROFIT" : isTimedExit ? "75M EXIT" : r.Status;
             const dateLbl = r._date ? (() => { const dc2 = fmtDateCell(r._date); return `${dc2.top} ${dc2.bot}`; })() : "";
             return (
               <div key={i} className="rounded-xl overflow-hidden"
@@ -899,7 +900,7 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                   {[
                     { label: "ENTRY",   val: `₹${r.Entry}`, color: dc },
                     { label: "SL",      val: `₹${r.SL}`,    color: "#e11d48" },
-                    { label: "LOT P&L", val: `${lPnl >= 0 ? "+" : "−"}₹${fmtIndianFull(Math.abs(lPnl))}`, color: pnlColor(lPnl) },
+                    { label: "LOT P&L", val: fmtIndianFull(lPnl), color: pnlColor(lPnl) },
                   ].map(({ label, val, color: c }) => (
                     <div key={label} className="px-3 py-2" style={{ background: cardBg }}>
                       <div className="text-[7px] mb-0.5" style={{ ...MONO, color: muted }}>{label}</div>
@@ -939,8 +940,9 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                 const pnl    = parseFloat(r.PnL) || 0;
                 const lPnl   = pnl * LOT_QTY;
                 const pnlPct = parseFloat(r.PnLPct) || 0;
-                const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT";
-                const isLoss = r.Status === "SL"     || r.Status === "TIME_EXIT";
+                const isTimedExit2 = r.Status === "TIME_EXIT";
+                const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT" || (isTimedExit2 && pnl >= 0);
+                const isLoss = r.Status === "SL" || (isTimedExit2 && pnl < 0);
                 const isEod  = r.Status === "EOD";
                 const dc     = dirColor(r.Direction);
                 const stClr  = isWin ? "#16a34a" : isLoss ? "#e11d48" : isEod ? "#b45309" : "#0284c7";
@@ -1040,9 +1042,9 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                           }}>
                           {isWin ? "WIN" : isLoss ? "LOSS" : isEod ? "EOD" : "OPEN"}
                         </span>
-                        <span className="text-[9px] flex-shrink-0">{isWin ? "🎯" : isLoss ? "🛑" : isEod ? "🕐" : "⏳"}</span>
+                        <span className="text-[9px] flex-shrink-0">{r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : isEod ? "🕐" : r.Status === "TIME_PROFIT" || r.Status === "TIME_EXIT" ? "⏱" : "⏳"}</span>
                         <span className="text-[8px] font-bold truncate" style={{ ...MONO, color: stClr }}>
-                          {r.Status === "TIME_PROFIT" ? "T-PROFIT" : r.Status === "TIME_EXIT" ? "T-EXIT" : r.Status}
+                          {r.Status === "TIME_PROFIT" ? "60M PROFIT" : r.Status === "TIME_EXIT" ? "75M EXIT" : r.Status}
                         </span>
                       </div>
                     )}
@@ -1057,7 +1059,7 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                     {/* CHARGES – Indian format */}
                     {visCols.has("charges") && (
                       <div className="px-2 text-[10px] font-bold tabular-nums whitespace-nowrap" style={{ ...MONO, color: "#b45309" }}>
-                        −₹{fmtIndianFull(chg)}
+                        {fmtIndianFull(-chg)}
                       </div>
                     )}
 
@@ -1065,7 +1067,7 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                     {visCols.has("pnl") && (
                       <div className="px-2 flex items-baseline gap-1 overflow-hidden">
                         <span className="text-[10px] font-bold tabular-nums whitespace-nowrap" style={{ ...MONO, color: pnlColor(lPnl) }}>
-                          {pnl >= 0 ? "+" : "−"}₹{fmtIndianFull(Math.abs(lPnl))}
+                          {fmtIndianFull(lPnl)}
                         </span>
                         <span className="text-[8px] tabular-nums" style={{ ...MONO, color: pnlColor(lPnl) }}>
                           {pnlPct >= 0 ? "+" : ""}{pnlPct.toFixed(1)}%
@@ -1129,8 +1131,8 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                 { label: "LOSS / SL",         val: `${losses}`,                  color: "#e11d48" },
                 { label: "EOD",               val: `${eod}`,                     color: "#b45309" },
                 { label: "WIN RATE",          val: wr ? `${wr}%` : "—",          color: wrClr },
-                { label: `LOT P&L (${LOT_QTY}×)`, val: `${totPnL >= 0 ? "+" : "−"}₹${fmtIndianFull(Math.abs(lotPnL))}`, color: pnlColor(lotPnL) },
-                { label: "TOTAL CHARGES",     val: `−₹${fmtIndianFull(totCharges)}`,   color: "#b45309" },
+                { label: `LOT P&L (${LOT_QTY}×)`, val: fmtIndianFull(lotPnL), color: pnlColor(lotPnL) },
+                { label: "TOTAL CHARGES",     val: fmtIndianFull(-totCharges),   color: "#b45309" },
               ].map(({ label, val, color: c }) => (
                 <div key={label} className="px-3 py-2.5" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
                   <div className="text-[7px] tracking-[1.5px] mb-1" style={{ ...MONO, color: muted }}>{label}</div>

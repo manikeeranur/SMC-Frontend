@@ -4794,10 +4794,10 @@ function SMCTableView({
     mode === "backtest" && histResults !== null ? histResults : alerts;
 
   const wins = tableAlerts.filter(
-    (a) => a.status === "TARGET" || a.status === "TIME_PROFIT",
+    (a) => a.status === "TARGET" || a.status === "TIME_PROFIT" || (a.status === "TIME_EXIT" && (a.currentPnL ?? 0) >= 0),
   ).length;
   const losses = tableAlerts.filter(
-    (a) => a.status === "SL" || a.status === "TIME_EXIT",
+    (a) => a.status === "SL" || (a.status === "TIME_EXIT" && (a.currentPnL ?? 0) < 0),
   ).length;
   const eod = tableAlerts.filter((a) => a.status === "EOD").length;
   const active = tableAlerts.filter((a) => a.status === "ACTIVE").length;
@@ -4864,7 +4864,7 @@ function SMCTableView({
     .reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
 
   const COLS =
-    "40px 60px 1fr 150px 70px 70px 72px 72px 72px 90px 155px 80px 65px 80px";
+    "40px 60px 1fr 150px 70px 70px 72px 72px 72px 90px 155px 80px 65px 130px 80px";
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -5234,9 +5234,10 @@ function SMCTableView({
           <div className="md:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
             {tableAlerts.map((a, idx) => {
               const misCE = a.direction === "CE";
+              const misTimedExit = a.status === "TIME_EXIT";
               const misWin =
-                a.status === "TARGET" || a.status === "TIME_PROFIT";
-              const misLoss = a.status === "SL" || a.status === "TIME_EXIT";
+                a.status === "TARGET" || a.status === "TIME_PROFIT" || (misTimedExit && (a.currentPnL ?? 0) >= 0);
+              const misLoss = a.status === "SL" || (misTimedExit && (a.currentPnL ?? 0) < 0);
               const mdirClr = misCE ? "#0284c7" : "#e11d48";
               const mstClr = misWin
                 ? "#16a34a"
@@ -5246,13 +5247,7 @@ function SMCTableView({
                     ? "#b45309"
                     : "#0284c7";
               const mpnlUp = (a.currentPnL ?? 0) >= 0;
-              const mpnlClr = misWin
-                ? "#16a34a"
-                : misLoss
-                  ? "#e11d48"
-                  : mpnlUp
-                    ? "#16a34a"
-                    : "#e11d48";
+              const mpnlClr = mpnlUp ? "#16a34a" : "#e11d48";
               const mstIco =
                 a.status === "TARGET"
                   ? "🎯"
@@ -5260,7 +5255,9 @@ function SMCTableView({
                     ? "🛑"
                     : a.status === "EOD"
                       ? "🕐"
-                      : "⏳";
+                      : a.status === "TIME_PROFIT" || misTimedExit
+                        ? "⏱"
+                        : "⏳";
               const mstLbl =
                 a.status === "TIME_PROFIT"
                   ? "60M WIN"
@@ -5669,6 +5666,7 @@ function SMCTableView({
                   `P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
                   "CHARGES",
                   "MAX PTS",
+                  "MAX PROFITS",
                   "",
                 ].map((h) => (
                   <div
@@ -5687,12 +5685,14 @@ function SMCTableView({
                   const isCE = a.direction === "CE";
                   const isTimedWin = a.status === "TIME_PROFIT";
                   const isTimedExit = a.status === "TIME_EXIT";
+                  const isTimedExitWin = isTimedExit && a.currentPnL >= 0;
+                  const isTimedExitLoss = isTimedExit && a.currentPnL < 0;
                   const rowBg =
-                    a.status === "TARGET" || isTimedWin
+                    a.status === "TARGET" || isTimedWin || isTimedExitWin
                       ? isDark
                         ? "#052e16"
                         : "#f0fdf4"
-                      : a.status === "SL" || isTimedExit
+                      : a.status === "SL" || isTimedExitLoss
                         ? isDark
                           ? "#2d0505"
                           : "#fff5f5"
@@ -5709,22 +5709,15 @@ function SMCTableView({
                               : "#fafafa";
                   const dirColor = isCE ? "#0284c7" : "#e11d48";
                   const stColor =
-                    a.status === "TARGET" || isTimedWin
+                    a.status === "TARGET" || isTimedWin || isTimedExitWin
                       ? "#16a34a"
-                      : a.status === "SL" || isTimedExit
+                      : a.status === "SL" || isTimedExitLoss
                         ? "#e11d48"
                         : a.status === "EOD"
                           ? "#b45309"
                           : "#0284c7";
                   const pnlUp = a.currentPnL >= 0;
-                  const pnlColor =
-                    a.status === "TARGET" || isTimedWin
-                      ? "#16a34a"
-                      : a.status === "SL" || isTimedExit
-                        ? "#e11d48"
-                        : pnlUp
-                          ? "#16a34a"
-                          : "#e11d48";
+                  const pnlColor = pnlUp ? "#16a34a" : "#e11d48";
                   const stIcon =
                     a.status === "TARGET"
                       ? "🎯"
@@ -6068,6 +6061,33 @@ function SMCTableView({
                           >
                             +{a.peakMove.toFixed(2)}
                           </div>
+                        ) : (
+                          <div
+                            className="text-[9px] text-[#94a3b8]"
+                            style={MONO}
+                          >
+                            —
+                          </div>
+                        )}
+                      </div>
+
+                      {/* MAX PROFITS */}
+                      <div className="px-2 py-2.5">
+                        {(a.peakMove ?? 0) > 0 ? (
+                          <>
+                            <div
+                              className="text-[12px] font-bold tabular-nums leading-tight"
+                              style={{ ...MONO, color: "#7c3aed" }}
+                            >
+                              +₹{fmtFull(a.peakMove * LOT_QTY)}
+                            </div>
+                            <div
+                              className="text-[8px] font-bold tabular-nums mt-0.5"
+                              style={{ ...MONO, color: "#7c3aed" }}
+                            >
+                              {a.peakMove.toFixed(2)} × {LOT_QTY}
+                            </div>
+                          </>
                         ) : (
                           <div
                             className="text-[9px] text-[#94a3b8]"

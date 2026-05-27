@@ -21,9 +21,9 @@ const DAY_NAMES = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
 
 const STATUS_COLOR: Record<string, string> = {
   TARGET:      "#22c55e",
-  TIME_PROFIT: "#86efac",
+  TIME_PROFIT: "#22c55e",
   SL:          "#ef4444",
-  TIME_EXIT:   "#f97316",
+  TIME_EXIT:   "#ef4444",
   EOD:         "#94a3b8",
   ACTIVE:      "#60a5fa",
 };
@@ -81,7 +81,7 @@ function buildCalendar(year: number, month: number): (number | null)[] {
 }
 
 const LOT_QTY = LOT_SIZE * NUM_LOTS;
-const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 155px 90px 65px";
+const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 155px 90px 65px 130px";
 
 function fmtFull(n: number) {
   const [int, dec] = Math.abs(n).toFixed(2).split(".");
@@ -104,7 +104,7 @@ export function ResultsContent() {
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
-  const [tab, setTab]           = useState<"backtest" | "live">("backtest");
+  const [tab, setTab]           = useState<"backtest" | "live">("live");
   const [dates, setDates]       = useState<{ backtest: string[]; live: string[] }>({ backtest: [], live: [] });
   const [selDate, setSelDate]   = useState("");
   const [rows, setRows]         = useState<Row[]>([]);
@@ -122,7 +122,7 @@ export function ResultsContent() {
       .then(r => r.json())
       .then(d => {
         setDates(d);
-        const first = d["backtest"]?.[0];
+        const first = d["live"]?.[0];
         if (first) setSelDate(first);
       })
       .catch(() => setErr("Failed to load dates"));
@@ -172,8 +172,8 @@ export function ResultsContent() {
     return { totalPnL, trades, wins, days: days.length };
   }, [summaryMap, calMonth]);
 
-  const wins     = rows.filter(r => r.Status === "TARGET" || r.Status === "TIME_PROFIT").length;
-  const losses   = rows.filter(r => r.Status === "SL" || r.Status === "TIME_EXIT").length;
+  const wins     = rows.filter(r => r.Status === "TARGET" || r.Status === "TIME_PROFIT" || (r.Status === "TIME_EXIT" && (parseFloat(r.PnL) || 0) >= 0)).length;
+  const losses   = rows.filter(r => r.Status === "SL" || (r.Status === "TIME_EXIT" && (parseFloat(r.PnL) || 0) < 0)).length;
   const eod      = rows.filter(r => r.Status === "EOD").length;
   const closed   = wins + losses;
   const winRate  = closed > 0 ? ((wins / closed) * 100).toFixed(1) : null;
@@ -428,12 +428,13 @@ export function ResultsContent() {
                   const pnl    = parseFloat(r.PnL) || 0;
                   const lPnl   = pnl * LOT_QTY;
                   const pnlPct = parseFloat(r.PnLPct) || 0;
-                  const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT";
-                  const isLoss = r.Status === "SL" || r.Status === "TIME_EXIT";
+                  const isTimedExit = r.Status === "TIME_EXIT";
+                  const isWin  = r.Status === "TARGET" || r.Status === "TIME_PROFIT" || (isTimedExit && pnl >= 0);
+                  const isLoss = r.Status === "SL" || (isTimedExit && pnl < 0);
                   const dc     = dirColor(r.Direction);
-                  const sc     = STATUS_COLOR[r.Status] ?? "#94a3b8";
-                  const stIco  = r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : r.Status === "EOD" ? "🕐" : r.Status === "ACTIVE" ? "⏳" : "⏹";
-                  const stLbl  = r.Status === "TIME_PROFIT" ? "T-PROFIT" : r.Status === "TIME_EXIT" ? "T-EXIT" : r.Status;
+                  const sc     = isTimedExit ? (pnl >= 0 ? "#22c55e" : "#ef4444") : STATUS_COLOR[r.Status] ?? "#94a3b8";
+                  const stIco  = r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : r.Status === "EOD" ? "🕐" : r.Status === "ACTIVE" ? "⏳" : r.Status === "TIME_PROFIT" || r.Status === "TIME_EXIT" ? "⏱" : "⏹";
+                  const stLbl  = r.Status === "TIME_PROFIT" ? "60M PROFIT" : r.Status === "TIME_EXIT" ? "75M EXIT" : r.Status;
                   const t1Hit  = r.T1Hit === "Y";
                   const t2Hit  = r.Status === "TARGET";
                   return (
@@ -534,7 +535,7 @@ export function ResultsContent() {
                   <div style={{ minWidth: "900px" }}>
                     <div className="grid flex-shrink-0 border-b-2"
                       style={{ gridTemplateColumns: COLS_DESKTOP, borderColor: isDark ? "#1e2a3a" : "#cbd5e1", background: isDark ? "#080d14" : "#f8fafc" }}>
-                      {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,"CHARGES","MAX PTS"].map(h => (
+                      {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,"CHARGES","MAX PTS","MAX PROFITS"].map(h => (
                         <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase"
                           style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{h}</div>
                       ))}
@@ -546,12 +547,12 @@ export function ResultsContent() {
                         const pnlPct     = parseFloat(r.PnLPct) || 0;
                         const isTimedWin = r.Status === "TIME_PROFIT";
                         const isTimedExit= r.Status === "TIME_EXIT";
-                        const isWin      = r.Status === "TARGET" || isTimedWin;
-                        const isLoss     = r.Status === "SL" || isTimedExit;
+                        const isWin      = r.Status === "TARGET" || isTimedWin || (isTimedExit && pnl >= 0);
+                        const isLoss     = r.Status === "SL" || (isTimedExit && pnl < 0);
                         const isEod      = r.Status === "EOD";
                         const dc         = dirColor(r.Direction);
                         const stColor    = isWin ? "#16a34a" : isLoss ? "#e11d48" : isEod ? "#b45309" : "#0284c7";
-                        const pnlClr     = isWin ? "#16a34a" : isLoss ? "#e11d48" : pnl >= 0 ? "#16a34a" : "#e11d48";
+                        const pnlClr     = pnl >= 0 ? "#16a34a" : "#e11d48";
                         const stIcon     = r.Status === "TARGET" ? "🎯" : r.Status === "SL" ? "🛑" : isEod ? "🕐" : isTimedWin ? "⏱" : isTimedExit ? "⏱" : "⏳";
                         const stLabel    = isTimedWin ? "60M PROFIT" : isTimedExit ? "75M EXIT" : r.Status;
                         const t1Hit      = r.T1Hit === "Y";
@@ -632,6 +633,23 @@ export function ResultsContent() {
                               {r.MaxPoints && parseFloat(r.MaxPoints) > 0
                                 ? <div className="text-[11px] font-bold tabular-nums text-[#7c3aed]" style={MONO}>+{r.MaxPoints}</div>
                                 : <div className="text-[9px]" style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>—</div>}
+                            </div>
+                            <div className="px-2 py-2.5">
+                              {r.MaxPoints && parseFloat(r.MaxPoints) > 0 ? (() => {
+                                const maxLot = parseFloat(r.MaxPoints) * LOT_QTY;
+                                return (
+                                  <>
+                                    <div className="text-[12px] font-bold tabular-nums leading-tight" style={{ ...MONO, color: "#7c3aed" }}>
+                                      +₹{fmtFull(maxLot)}
+                                    </div>
+                                    <div className="text-[8px] font-bold tabular-nums mt-0.5" style={{ ...MONO, color: "#7c3aed" }}>
+                                      {r.MaxPoints} × {LOT_QTY}
+                                    </div>
+                                  </>
+                                );
+                              })() : (
+                                <div className="text-[9px]" style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>—</div>
+                              )}
                             </div>
                           </div>
                         );

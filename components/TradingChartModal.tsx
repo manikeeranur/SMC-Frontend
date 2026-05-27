@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { optionsApi, accountApi, createWS } from "@/lib/api";
+import { optionsApi, accountApi, createWS, isDemoMode } from "@/lib/api";
 import { calcRR } from "@/lib/options";
 import { getLotSize } from "@/lib/constants";
 import { useTheme } from "@/lib/theme";
@@ -245,7 +245,9 @@ export default function TradingChartModal({
   const [ohlc, setOhlc]     = useState<{ o:number; h:number; l:number; c:number; v:number } | null>(null);
   const [wallet, setWallet] = useState<number | null>(null);
   const [orderState, setOS] = useState<{ loading: boolean; result: string | null }>({ loading: false, result: null });
-  const [tradeLines, setTL] = useState<{ entry:number; target:number; sl:number; entryTime:string } | null>(null);
+  const [tradeLines, setTL] = useState<{ entry:number; target:number; target2?:number; sl:number; entryTime:string } | null>(null);
+  const [exitState,  setExitState] = useState<"idle"|"loading"|"done"|"error">("idle");
+  const [acctLivePos, setAcctLivePos] = useState<{ tradingsymbol:string; buyPrice:number; currentPrice:number; quantity:number; pnl:number; status:string; direction:string } | null>(null);
   const [orderLots, setOL]  = useState(1);
   const [tradeOpen, setTO]  = useState(false); // footer trade panel visibility
   const [indOpen,   setIndOpen] = useState(false);
@@ -391,7 +393,7 @@ export default function TradingChartModal({
   const ctRef        = useRef<ChartType>("candle");
   const indRef       = useRef<Set<Indicator>>(new Set<Indicator>());
   const tlDataRef    = useRef<typeof tradeLines>(null);
-  const tlSeriesRef  = useRef<{ ep:any; tp:any; sp:any } | null>(null);
+  const tlSeriesRef  = useRef<{ ep:any; tp:any; t2:any; sp:any } | null>(null);
   const isDarkRef    = useRef(isDark);
   const fetchedFromRef  = useRef<string>("");
   const hasMoreRef      = useRef(false);
@@ -475,6 +477,29 @@ export default function TradingChartModal({
       })
       .catch((e: any) => { setError(e?.message ?? "Failed to load"); setLoading(false); });
   }, [token, tf]);
+
+  // ── Poll account live positions every 2s — show card for OPEN positions ────
+  useEffect(() => {
+    if (isDemoMode || !tradingsymbol) return;
+    let active = true, running = false;
+    async function tick() {
+      if (running) return;
+      running = true;
+      try {
+        const res = await accountApi.livePositions();
+        if (active) {
+          const pos = (res.positions ?? []).find(
+            (p: any) => p.tradingsymbol === tradingsymbol && p.status === "OPEN"
+          );
+          setAcctLivePos(pos ?? null);
+        }
+      } catch {}
+      finally { running = false; }
+    }
+    tick();
+    const id = setInterval(tick, 500);
+    return () => { active = false; clearInterval(id); };
+  }, [tradingsymbol]);
 
   // ── Build / rebuild chart on data / tf / chartType / theme change ─────────
   useEffect(() => {
@@ -1023,10 +1048,20 @@ export default function TradingChartModal({
   }
 
   // ── Trade line helpers ────────────────────────────────────────────────────
+  function removeTLs(series: any) {
+    if (!tlSeriesRef.current) return;
+    try { series.removePriceLine(tlSeriesRef.current.ep); } catch {}
+    try { series.removePriceLine(tlSeriesRef.current.tp); } catch {}
+    try { if (tlSeriesRef.current.t2) series.removePriceLine(tlSeriesRef.current.t2); } catch {}
+    try { series.removePriceLine(tlSeriesRef.current.sp); } catch {}
+    tlSeriesRef.current = null;
+  }
+
   function mkTLs(series: any, tl: NonNullable<typeof tradeLines>) {
     return {
-      ep: series.createPriceLine({ price: tl.entry,  color: "#38bdf8", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `Entry ₹${tl.entry.toFixed(2)} (${tl.entryTime})` }),
-      tp: series.createPriceLine({ price: tl.target, color: "#16a34a", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `Target ₹${tl.target.toFixed(2)}` }),
+      ep: series.createPriceLine({ price: tl.entry,  color: "#38bdf8", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `Entry ₹${tl.entry.toFixed(2)}${tl.entryTime ? ` (${tl.entryTime})` : ""}` }),
+      tp: series.createPriceLine({ price: tl.target, color: "#22c55e", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `T1 ₹${tl.target.toFixed(2)}` }),
+      t2: tl.target2 != null ? series.createPriceLine({ price: tl.target2, color: "#15803d", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `T2 ₹${tl.target2.toFixed(2)}` }) : null,
       sp: series.createPriceLine({ price: tl.sl,     color: "#e11d48", lineWidth: 2, lineStyle: 2, axisLabelVisible: true, title: `SL ₹${tl.sl.toFixed(2)}` }),
     };
   }
@@ -1043,21 +1078,39 @@ export default function TradingChartModal({
       const rr        = calcRR(entry);
       const now       = new Date();
       const entryTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      const tl        = { entry, target: rr.target1, sl: rr.sl, entryTime };
+      const tl        = { entry, target: rr.target1, target2: rr.target2, sl: rr.sl, entryTime };
       tlDataRef.current = tl;
       setTL(tl);
       setOS({ loading: false, result: `✓ ${action} @ ₹${entry.toFixed(2)}` });
       const s = seriesRef.current;
-      if (s.main) {
-        if (tlSeriesRef.current) {
-          try { s.main.removePriceLine(tlSeriesRef.current.ep); s.main.removePriceLine(tlSeriesRef.current.tp); s.main.removePriceLine(tlSeriesRef.current.sp); } catch {}
-        }
-        try { tlSeriesRef.current = mkTLs(s.main, tl); } catch {}
-      }
+      if (s.main) { removeTLs(s.main); try { tlSeriesRef.current = mkTLs(s.main, tl); } catch {} }
     } catch (e: any) {
       setOS({ loading: false, result: `✗ ${e?.message ?? "Order failed"}` });
     }
   }
+
+  // ── Immediate exit ─────────────────────────────────────────────────────────
+  async function handleImmediateExit() {
+    if (!acctLivePos || exitState === "loading") return;
+    setExitState("loading");
+    try {
+      await accountApi.exitPosition(acctLivePos.tradingsymbol, acctLivePos.quantity);
+      setExitState("done");
+      setAcctLivePos(null);
+    } catch { setExitState("error"); }
+  }
+
+  // ── Draw live position price lines when chart is ready ─────────────────────
+  useEffect(() => {
+    if (loading || !acctLivePos) return;
+    const s = seriesRef.current;
+    if (!s.main) return;
+    const rr = calcRR(acctLivePos.buyPrice);
+    const tl = { entry: acctLivePos.buyPrice, target: rr.target1, target2: rr.target2, sl: rr.sl, entryTime: "" };
+    removeTLs(s.main);
+    try { tlSeriesRef.current = mkTLs(s.main, tl); } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acctLivePos, loading]);
 
   // ── Simple view computed ─────────────────────────────────────────────────
   const currentPrice      = livePrice ?? rawRef.current[rawRef.current.length - 1]?.close ?? 0;
@@ -1315,6 +1368,72 @@ export default function TradingChartModal({
             <span style={{ color: txtMuted }}>C<span style={{ color: txtPrimary }}> {ohlc.c.toFixed(2)}</span></span>
           </div>
         )}
+
+        {/* Live position card — top-right, real account OPEN positions only */}
+        {!isDemoMode && !loading && !error && acctLivePos && (() => {
+          const rr        = calcRR(acctLivePos.buyPrice);
+          const cp        = livePrice ?? acctLivePos.currentPrice ?? 0;
+          const pnlPts    = cp - acctLivePos.buyPrice;
+          const pnlVal    = pnlPts * acctLivePos.quantity;
+          const pnlClr    = pnlVal >= 0 ? "#22c55e" : "#e11d48";
+          const lockedPts = Math.max(0, Math.min(pnlPts, rr.target1 - acctLivePos.buyPrice));
+          const fmtPnl    = (v: number) => `${v >= 0 ? "+" : ""}₹${Math.abs(v).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+          const exitLbl   = exitState === "loading" ? "Exiting…" : exitState === "done" ? "Exited ✓" : exitState === "error" ? "Retry Exit" : "⚡ Exit Now";
+          return (
+            <div className="absolute top-2 right-28 z-40 rounded-xl overflow-hidden"
+              style={{ background: isDark ? "rgba(8,11,15,0.92)" : "rgba(255,255,255,0.95)", backdropFilter: "blur(8px)", border: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}`, minWidth: 176 }}>
+              {/* Header */}
+              <div className="flex items-center justify-between px-2.5 py-1.5"
+                style={{ background: isDark ? "#0f172a" : "#f1f5f9", borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
+                <span className="text-[8px] font-black tracking-widest" style={{ ...MONO, color: "#38bdf8" }}>LIVE POSITION</span>
+                <span className="text-[7px] font-bold px-1.5 py-0.5 rounded-full"
+                  style={{ background: "#16a34a20", color: "#16a34a", border: "1px solid #16a34a40" }}>
+                  {acctLivePos.status}
+                </span>
+              </div>
+              {/* Unrealised P&L */}
+              <div className="px-2.5 py-1.5 flex flex-col items-center"
+                style={{ borderBottom: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
+                <span className="text-[7px] font-bold tracking-widest mb-0.5" style={{ ...MONO, color: txtMuted }}>UNREALISED P&L</span>
+                <span className="text-[15px] font-black leading-none" style={{ ...MONO, color: pnlClr }}>{fmtPnl(pnlVal)}</span>
+                <span className="text-[8px] mt-0.5" style={{ ...MONO, color: pnlClr }}>{pnlPts >= 0 ? "+" : ""}{pnlPts.toFixed(2)} pts · {acctLivePos.quantity} qty</span>
+              </div>
+              {/* Price levels grid */}
+              <div className="grid grid-cols-2 gap-px p-px" style={{ background: isDark ? "#1e293b" : "#e2e8f0" }}>
+                {([
+                  { label: "ENTRY", val: acctLivePos.buyPrice.toFixed(2), clr: "#38bdf8" },
+                  { label: "T1",    val: rr.target1.toFixed(2),           clr: "#22c55e" },
+                  { label: "T2",    val: rr.target2.toFixed(2),           clr: "#15803d" },
+                  { label: "SL",    val: rr.sl.toFixed(2),                clr: "#e11d48" },
+                ] as { label: string; val: string; clr: string }[]).map(({ label, val, clr }) => (
+                  <div key={label} className="flex flex-col items-center py-1.5"
+                    style={{ background: isDark ? "#080b0f" : "#f8fafc" }}>
+                    <span className="text-[7px] font-bold tracking-widest" style={{ ...MONO, color: txtMuted }}>{label}</span>
+                    <span className="text-[9px] font-black" style={{ ...MONO, color: clr }}>₹{val}</span>
+                  </div>
+                ))}
+              </div>
+              {/* Locked points */}
+              <div className="flex items-center justify-between px-2.5 py-1.5"
+                style={{ borderTop: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
+                <span className="text-[7px] font-bold tracking-widest" style={{ ...MONO, color: txtMuted }}>LOCKED PTS</span>
+                <span className="text-[8px] font-black" style={{ ...MONO, color: lockedPts > 0 ? "#22c55e" : txtMuted }}>
+                  {lockedPts >= 0 ? "+" : ""}{lockedPts.toFixed(2)}
+                </span>
+              </div>
+              {/* Exit button */}
+              <div className="px-2 pb-2">
+                <button
+                  disabled={exitState === "loading" || exitState === "done"}
+                  onClick={handleImmediateExit}
+                  className="w-full py-1.5 rounded-lg text-[8px] font-black tracking-wide cursor-pointer transition-all active:scale-95"
+                  style={{ ...MONO, background: exitState === "done" ? "#16a34a" : "#e11d48", color: "#fff", opacity: exitState === "loading" || exitState === "done" ? 0.7 : 1 }}>
+                  {exitLbl}
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Symbol badge + Buy/Sell toggles — bottom-left (small screens, tech chart only) */}
         {!simpleMode && !loading && !error && !isIndex && (
@@ -1688,15 +1807,21 @@ export default function TradingChartModal({
         {tradeLines && (
           <div className="flex items-center gap-3 px-4 pb-2.5 flex-wrap">
             <div className="flex items-center gap-1">
-              <div className="w-4 border-t-[2px] border-dashed" style={{ borderColor: "#38bdf8" }} />
+              <div className="w-4 border-t-[1px] border-solid" style={{ borderColor: "#38bdf8" }} />
               <span className="text-[8px] font-bold" style={{ ...MONO, color: "#38bdf8" }}>Entry ₹{tradeLines.entry.toFixed(2)}</span>
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-4 border-t-[2px] border-dashed" style={{ borderColor: "#16a34a" }} />
-              <span className="text-[8px] font-bold" style={{ ...MONO, color: "#16a34a" }}>Target ₹{tradeLines.target.toFixed(2)}</span>
+              <div className="w-4 border-t-[1px] border-solid" style={{ borderColor: "#22c55e" }} />
+              <span className="text-[8px] font-bold" style={{ ...MONO, color: "#22c55e" }}>T1 ₹{tradeLines.target.toFixed(2)}</span>
             </div>
+            {tradeLines.target2 != null && (
+              <div className="flex items-center gap-1">
+                <div className="w-4 border-t-[1px] border-solid" style={{ borderColor: "#15803d" }} />
+                <span className="text-[8px] font-bold" style={{ ...MONO, color: "#15803d" }}>T2 ₹{tradeLines.target2.toFixed(2)}</span>
+              </div>
+            )}
             <div className="flex items-center gap-1">
-              <div className="w-4 border-t-[2px] border-dashed" style={{ borderColor: "#e11d48" }} />
+              <div className="w-4 border-t-[1px] border-solid" style={{ borderColor: "#e11d48" }} />
               <span className="text-[8px] font-bold" style={{ ...MONO, color: "#e11d48" }}>SL ₹{tradeLines.sl.toFixed(2)}</span>
             </div>
           </div>

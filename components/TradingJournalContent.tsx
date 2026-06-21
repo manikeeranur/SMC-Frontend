@@ -13,7 +13,9 @@ const ACCENT = "#7c3aed";
 const MONTH_NAMES  = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const MONTH_SHORT  = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 const DAY_NAMES    = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-const LOT_QTY      = LOT_SIZE * NUM_LOTS;
+// Lot qty — always use the constant at module level (SSR-safe).
+// Components that need the adjustable version read it reactively via useEffect.
+const LOT_QTY = LOT_SIZE * NUM_LOTS;
 
 type DaySummary = { date: string; totalPnL: number; trades: number; wins: number };
 type ViewType   = "month" | "year" | "overall";
@@ -475,6 +477,479 @@ function calcCharges(entry: number, exit: number, qty: number): number {
   return br + stt + exc + clr + gst + to * 0.000001 + entry * qty * 0.00003;
 }
 
+// ─── Analytics helpers ────────────────────────────────────────────────────────
+
+type CurvePoint  = { idx: number; label: string; cumLot: number; pnl: number };
+type ConceptStat = { concept: string; trades: number; wins: number; losses: number; pnl: number };
+type HourStat    = { hour: number; label: string; trades: number; wins: number; pnl: number };
+
+function tradeIsWin(r: Row)  { const p = parseFloat(r.PnL) || 0; return r.Status === "TARGET" || r.Status === "TIME_PROFIT" || (r.Status === "TIME_EXIT" && p >= 0); }
+function tradeIsLoss(r: Row) { const p = parseFloat(r.PnL) || 0; return r.Status === "SL"     || (r.Status === "TIME_EXIT" && p < 0); }
+
+function computeEquityCurve(rows: Row[]): CurvePoint[] {
+  const sorted = [...rows].sort((a, b) => {
+    const dc = (a._date ?? "").localeCompare(b._date ?? "");
+    return dc !== 0 ? dc : (a.EntryTime ?? "").localeCompare(b.EntryTime ?? "");
+  });
+  let cum = 0;
+  return sorted.map((r, i) => {
+    const pnl = (parseFloat(r.PnL) || 0) * LOT_QTY;
+    cum += pnl;
+    const dc = r._date ? fmtDateCell(r._date) : null;
+    return { idx: i, label: dc ? dc.top : `#${i + 1}`, cumLot: cum, pnl };
+  });
+}
+
+function computeConceptStats(rows: Row[]): ConceptStat[] {
+  const map = new Map<string, ConceptStat>();
+  for (const r of rows) {
+    const pnl    = (parseFloat(r.PnL) || 0) * LOT_QTY;
+    const isW    = tradeIsWin(r), isL = tradeIsLoss(r);
+    const cs     = r.Concepts ? r.Concepts.split(",").map((c: string) => c.trim()).filter(Boolean) : ["—"];
+    for (const c of cs) {
+      if (!map.has(c)) map.set(c, { concept: c, trades: 0, wins: 0, losses: 0, pnl: 0 });
+      const s = map.get(c)!; s.trades++; if (isW) s.wins++; if (isL) s.losses++; s.pnl += pnl;
+    }
+  }
+  return [...map.values()].sort((a, b) => b.trades - a.trades);
+}
+
+function computeStreaks(rows: Row[]) {
+  const res = [...rows]
+    .sort((a, b) => { const dc = (a._date ?? "").localeCompare(b._date ?? ""); return dc !== 0 ? dc : (a.EntryTime ?? "").localeCompare(b.EntryTime ?? ""); })
+    .filter(r => r.Status !== "ACTIVE")
+    .map(r => (parseFloat(r.PnL) || 0) >= 0 ? "W" : "L");
+  if (!res.length) return { current: 0, currentType: "N" as "W"|"L"|"N", bestWin: 0, bestLoss: 0 };
+  let bestWin = 0, bestLoss = 0, cur = 1;
+  for (let i = 1; i < res.length; i++) {
+    if (res[i] === res[i - 1]) { cur++; }
+    else { if (res[i - 1] === "W") bestWin = Math.max(bestWin, cur); else bestLoss = Math.max(bestLoss, cur); cur = 1; }
+  }
+  if (res[res.length - 1] === "W") bestWin = Math.max(bestWin, cur); else bestLoss = Math.max(bestLoss, cur);
+  let current = 1; const lastType = res[res.length - 1] as "W"|"L";
+  for (let i = res.length - 2; i >= 0; i--) { if (res[i] === lastType) current++; else break; }
+  return { current, currentType: lastType, bestWin, bestLoss };
+}
+
+function computeTimeAnalysis(rows: Row[]): HourStat[] {
+  const map = new Map<number, { trades: number; wins: number; pnl: number }>();
+  for (const r of rows) {
+    if (!r.EntryTime) continue;
+    const hour = parseInt(r.EntryTime.split(":")[0], 10); if (isNaN(hour)) continue;
+    const pnl  = (parseFloat(r.PnL) || 0) * LOT_QTY;
+    if (!map.has(hour)) map.set(hour, { trades: 0, wins: 0, pnl: 0 });
+    const s = map.get(hour)!; s.trades++; if (tradeIsWin(r)) s.wins++; s.pnl += pnl;
+  }
+  return [...map.entries()].sort(([a], [b]) => a - b).map(([hour, s]) => {
+    const h = hour % 12 || 12, ampm = hour >= 12 ? "PM" : "AM";
+    return { hour, label: `${h}${ampm}`, ...s };
+  });
+}
+
+function exportToCSV(rows: Row[]) {
+  const heads = ["Date","EntryTime","ExitTime","Direction","Strike","Entry","SL","T1","T2","Status","PnL(premium)","PnL(lot)","PnL%","Concepts","MaxPoints"];
+  const lines = [heads.join(","), ...rows.map(r => {
+    const pnl = parseFloat(r.PnL) || 0;
+    return [r._date ?? "", r.EntryTime ?? "", r.ExitTime ?? "", r.Direction ?? "", r.Strike ?? "",
+      r.Entry ?? "", r.SL ?? "", r.Target1 ?? "", r.Target2 ?? "", r.Status ?? "",
+      pnl.toFixed(2), (pnl * LOT_QTY).toFixed(2), r.PnLPct ?? "",
+      `"${(r.Concepts ?? "").replace(/"/g, '""')}"`, r.MaxPoints ?? ""].join(",");
+  })];
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob); const a = document.createElement("a");
+  a.href = url; a.download = `smc_trades_${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportToJSON(rows: Row[], stats: { wins: number; losses: number; lotPnL: number; wr: string | null }) {
+  const payload = {
+    exportDate: new Date().toISOString(),
+    totalTrades: rows.length,
+    stats,
+    trades: rows.map(r => ({ ...r, lotPnL: (parseFloat(r.PnL) || 0) * LOT_QTY })),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url  = URL.createObjectURL(blob); const a = document.createElement("a");
+  a.href = url; a.download = `smc_snapshot_${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Risk Metrics ─────────────────────────────────────────────────────────────
+
+type RiskMetrics = {
+  profitFactor: number; sharpe: number; sortino: number;
+  avgWin: number; avgLoss: number; expectancy: number;
+  rMultiples: { bucket: string; count: number }[];
+};
+
+function computeRiskMetrics(rows: Row[]): RiskMetrics {
+  const closed  = rows.filter(r => r.Status !== "ACTIVE");
+  const returns = closed.map(r => (parseFloat(r.PnL) || 0) * LOT_QTY);
+  const wins    = returns.filter(v => v > 0);
+  const losses  = returns.filter(v => v < 0);
+  const gProfit = wins.reduce((s, v) => s + v, 0);
+  const gLoss   = losses.reduce((s, v) => s + v, 0);
+  const profitFactor = Math.abs(gLoss) > 0 ? gProfit / Math.abs(gLoss) : gProfit > 0 ? 999 : 0;
+  const mean = (a: number[]) => a.length ? a.reduce((s, v) => s + v, 0) / a.length : 0;
+  const std  = (a: number[]) => { const m = mean(a); return Math.sqrt(mean(a.map(v => (v - m) ** 2))); };
+  const avgRet  = mean(returns), stdAll = std(returns), stdDown = std(returns.filter(v => v < 0));
+  const sharpe  = stdAll  > 0 ? (avgRet / stdAll)  * Math.sqrt(252) : 0;
+  const sortino = stdDown > 0 ? (avgRet / stdDown) * Math.sqrt(252) : 0;
+  const avgWin  = mean(wins), avgLoss = mean(losses);
+  const wr      = closed.length > 0 ? wins.length / closed.length : 0;
+  const expectancy = wr * avgWin + (1 - wr) * Math.abs(avgLoss);
+  const oneR    = Math.abs(avgLoss) || 1;
+  const BUCKETS = ["-3+","-2","-1","0","1","2","3","4","5+"];
+  const cnt: Record<string, number> = {}; for (const b of BUCKETS) cnt[b] = 0;
+  for (const v of returns) {
+    const r = v / oneR;
+    if      (r <= -2.5) cnt["-3+"]++;
+    else if (r <= -1.5) cnt["-2"]++;
+    else if (r <= -0.5) cnt["-1"]++;
+    else if (r <=  0.5) cnt["0"]++;
+    else if (r <=  1.5) cnt["1"]++;
+    else if (r <=  2.5) cnt["2"]++;
+    else if (r <=  3.5) cnt["3"]++;
+    else if (r <=  4.5) cnt["4"]++;
+    else                cnt["5+"]++;
+  }
+  return { profitFactor, sharpe, sortino, avgWin, avgLoss, expectancy, rMultiples: BUCKETS.map(b => ({ bucket: b, count: cnt[b] })) };
+}
+
+// ─── R-Multiple Chart ─────────────────────────────────────────────────────────
+
+function RMultipleChart({ metrics, isDark }: { metrics: RiskMetrics; isDark: boolean }) {
+  const muted = isDark ? "#64748b" : "#94a3b8";
+  const { rMultiples } = metrics;
+  const maxCount = Math.max(...rMultiples.map(b => b.count), 1);
+  const BAR_W = 30, GAP = 6, PAD_L = 8, PAD_R = 8, PAD_TOP = 24, PAD_BOT = 28, SVG_H = 120;
+  const BAR_MAX_H = SVG_H - PAD_TOP - PAD_BOT;
+  const SVG_W = PAD_L + rMultiples.length * (BAR_W + GAP) - GAP + PAD_R;
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} width={Math.max(SVG_W, 300)} height={SVG_H} style={{ display: "block" }}>
+        {rMultiples.map((b, i) => {
+          const x    = PAD_L + i * (BAR_W + GAP);
+          const barH = b.count > 0 ? Math.max((b.count / maxCount) * BAR_MAX_H - 2, 3) : 0;
+          const barY = PAD_TOP + BAR_MAX_H - barH;
+          const isPos = b.bucket === "0" ? false : !b.bucket.startsWith("-");
+          const clr   = b.bucket === "0" ? "#64748b" : isPos ? "#16a34a" : "#e11d48";
+          return (
+            <g key={b.bucket}>
+              {b.count > 0 && <rect x={x} y={barY} width={BAR_W} height={barH} fill={clr} rx={3} opacity={0.85} />}
+              {b.count > 0 && <text x={x + BAR_W / 2} y={barY - 4} textAnchor="middle" fontSize="8" fontWeight="bold" fontFamily="'Space Mono',monospace" fill={clr}>{b.count}</text>}
+              <text x={x + BAR_W / 2} y={SVG_H - 8} textAnchor="middle" fontSize="8" fontFamily="'Space Mono',monospace" fill={muted}>{b.bucket}R</text>
+            </g>
+          );
+        })}
+        <line x1={PAD_L} y1={PAD_TOP + BAR_MAX_H} x2={SVG_W - PAD_R} y2={PAD_TOP + BAR_MAX_H} stroke={isDark ? "#2a3a4a" : "#cbd5e1"} strokeWidth="1" />
+      </svg>
+    </div>
+  );
+}
+
+// ─── Risk Calculator ──────────────────────────────────────────────────────────
+
+function RiskCalculator({ isDark, border, color, muted }: { isDark: boolean; border: string; color: string; muted: string }) {
+  const [acct, setAcct]    = useState<number>(() => { try { return parseFloat(localStorage.getItem("smc_acct_size") ?? "0") || 0; } catch { return 0; } });
+  const [riskPct, setRisk] = useState(1);
+  const maxRisk   = acct > 0 ? acct * (riskPct / 100) : 0;
+  const slPerLot  = 20 * LOT_QTY; // typical 20pt SL × lot qty
+  const maxLots   = maxRisk > 0 ? Math.floor(maxRisk / slPerLot) : 0;
+  const save = (v: number) => { setAcct(v); localStorage.setItem("smc_acct_size", String(v)); };
+  const cardBg = isDark ? "#0d1420" : "#f8fafc";
+  return (
+    <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+      <div className="px-4 py-2 border-b" style={{ borderColor: border }}>
+        <span className="text-[9px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>POSITION SIZING CALCULATOR</span>
+      </div>
+      <div className="p-4 flex flex-wrap gap-4 items-end">
+        <div className="flex flex-col gap-1">
+          <label className="text-[7px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>ACCOUNT SIZE (₹)</label>
+          <input type="number" value={acct || ""} placeholder="e.g. 500000"
+            onChange={e => save(parseFloat(e.target.value) || 0)}
+            className="w-36 text-[9px] px-2 py-1.5 rounded-sm outline-none"
+            style={{ ...MONO, background: isDark ? "#0f1923" : "#fff", border: `1px solid ${isDark ? "#2a3a4a" : "#cbd5e1"}`, color }} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[7px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>RISK PER TRADE</label>
+          <div className="flex gap-1">
+            {[0.5, 1, 1.5, 2, 3].map(r => (
+              <button key={r} onClick={() => setRisk(r)}
+                className="px-2 py-1 text-[8px] font-bold rounded-sm cursor-pointer border"
+                style={{ ...MONO, background: riskPct === r ? ACCENT : "transparent", borderColor: riskPct === r ? ACCENT : (isDark ? "#2a3a4a" : "#cbd5e1"), color: riskPct === r ? "#fff" : muted }}>
+                {r}%
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1 ml-auto">
+          <div className="text-[7px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>MAX LOSS</div>
+          <div className="text-[14px] font-bold" style={{ ...MONO, color: maxRisk > 0 ? "#e11d48" : muted }}>{maxRisk > 0 ? fmtIndianFull(-maxRisk) : "—"}</div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <div className="text-[7px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>SAFE LOTS (20pt SL)</div>
+          <div className="text-[22px] font-bold" style={{ ...BEBAS, color: maxLots > 0 ? "#16a34a" : muted }}>{maxLots > 0 ? `${maxLots} LOT${maxLots > 1 ? "S" : ""}` : "—"}</div>
+        </div>
+      </div>
+      {acct > 0 && (
+        <div className="px-4 pb-3 text-[7px] flex flex-wrap gap-3" style={{ ...MONO, color: muted }}>
+          <span>{riskPct}% of ₹{(acct / 1000).toFixed(0)}K = {fmtIndianFull(-maxRisk)} max risk</span>
+          <span>· Lot qty: {LOT_QTY}</span>
+          <span>· 20pt SL = {fmtIndianFull(-slPerLot)}/lot</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Equity Curve Chart ───────────────────────────────────────────────────────
+
+function EquityCurveChart({ data, isDark }: { data: CurvePoint[]; isDark: boolean }) {
+  const [hov, setHov] = useState<number | null>(null);
+  const muted = isDark ? "#64748b" : "#94a3b8";
+  if (!data.length) return <div style={{ height: 130, display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ ...MONO, color: muted, fontSize: 10 }}>No data</span></div>;
+  const PL = 8, PR = 20, PT = 24, PB = 24, W = 600, H = 160, gW = W - PL - PR, gH = H - PT - PB;
+  const n = data.length, ys = data.map(d => d.cumLot);
+  const minY = Math.min(0, ...ys), maxY = Math.max(0, ...ys), rng = maxY - minY || 1;
+  const px = (i: number) => PL + (i / Math.max(n - 1, 1)) * gW;
+  const py = (v: number) => PT + (1 - (v - minY) / rng) * gH;
+  const zY  = py(0), pts = data.map((d, i) => `${px(i).toFixed(1)},${py(d.cumLot).toFixed(1)}`).join(" ");
+  const last = data[n - 1], lineClr = (last?.cumLot ?? 0) >= 0 ? "#16a34a" : "#e11d48";
+  const maxDD = (() => { let peak = -Infinity, dd = 0; for (const { cumLot: v } of data) { if (v > peak) peak = v; const d = peak - v; if (d > dd) dd = d; } return dd; })();
+  const hovPt = hov !== null ? data[hov] : null;
+  return (
+    <div style={{ overflowX: "auto", width: "100%" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} style={{ display: "block", minWidth: 280 }} onMouseLeave={() => setHov(null)}>
+        <line x1={PL} y1={zY.toFixed(1)} x2={W - PR} y2={zY.toFixed(1)} stroke={isDark ? "#2a3a4a" : "#cbd5e1"} strokeWidth="1" strokeDasharray="4,3" />
+        <polygon points={`${PL},${zY} ${pts} ${px(n - 1)},${zY}`} fill={lineClr} opacity={0.07} />
+        <polyline points={pts} fill="none" stroke={lineClr} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+        {data.map((_, i) => <rect key={i} x={px(i) - 8} y={PT} width={16} height={gH} fill="transparent" onMouseEnter={() => setHov(i)} />)}
+        {hovPt && hov !== null && <>
+          <line x1={px(hov).toFixed(1)} y1={PT} x2={px(hov).toFixed(1)} y2={PT + gH} stroke={lineClr} strokeWidth="1" strokeDasharray="2,2" opacity={0.5} />
+          <circle cx={px(hov).toFixed(1)} cy={py(hovPt.cumLot).toFixed(1)} r={4} fill={lineClr} stroke={isDark ? "#080b0f" : "#fff"} strokeWidth="1.5" />
+          {(() => {
+            const tx = Math.min(Math.max(px(hov) - 62, 2), W - 126);
+            const ty = py(hovPt.cumLot) < PT + 48 ? py(hovPt.cumLot) + 12 : py(hovPt.cumLot) - 48;
+            return <g pointerEvents="none">
+              <rect x={tx} y={ty} width={124} height={40} rx={5} fill={isDark ? "#0f1923" : "#fff"} stroke={lineClr} strokeWidth="1" style={{ filter: "drop-shadow(0 2px 6px rgba(0,0,0,.22))" }} />
+              <text x={tx + 62} y={ty + 14} textAnchor="middle" fontSize="9.5" fontWeight="bold" fontFamily="'Space Mono',monospace" fill={lineClr}>{fmtIndianFull(hovPt.cumLot)}</text>
+              <text x={tx + 62} y={ty + 29} textAnchor="middle" fontSize="7" fontFamily="'Space Mono',monospace" fill={muted}>#{hov + 1} · {hovPt.label} · trade {fmtIndianFull(hovPt.pnl)}</text>
+            </g>;
+          })()}
+        </>}
+        <text x={PL} y={H - 5} fontSize="7" fontFamily="'Space Mono',monospace" fill={muted}>#1</text>
+        <text x={W - PR} y={H - 5} textAnchor="end" fontSize="7" fontFamily="'Space Mono',monospace" fill={muted}>#{n}</text>
+        <text x={W - PR} y={PT - 7} textAnchor="end" fontSize="8" fontWeight="bold" fontFamily="'Space Mono',monospace" fill={lineClr}>{fmtIndianFull(last?.cumLot ?? 0)}</text>
+        {maxDD > 0 && <text x={PL} y={PT - 7} fontSize="7" fontFamily="'Space Mono',monospace" fill="#e11d48">DD {fmtIndianFull(-maxDD)}</text>}
+      </svg>
+    </div>
+  );
+}
+
+// ─── Analytics Panel ──────────────────────────────────────────────────────────
+
+function AnalyticsPanel({ rows, isDark, border, color, muted }: {
+  rows: Row[]; isDark: boolean; border: string; color: string; muted: string;
+}) {
+  const cardBg   = isDark ? "#0d1420" : "#f8fafc";
+  const curve    = useMemo(() => computeEquityCurve(rows), [rows]);
+  const concepts = useMemo(() => computeConceptStats(rows), [rows]);
+  const streaks  = useMemo(() => computeStreaks(rows), [rows]);
+  const hours    = useMemo(() => computeTimeAnalysis(rows), [rows]);
+  const rMetrics = useMemo(() => computeRiskMetrics(rows), [rows]);
+  const dirStats = useMemo(() => (["CE", "PE"] as const).map(dir => {
+    const dr = rows.filter(r => r.Direction === dir);
+    const pnl = dr.reduce((s, r) => s + (parseFloat(r.PnL) || 0) * LOT_QTY, 0);
+    const wins = dr.filter(tradeIsWin).length;
+    return { dir, count: dr.length, pnl, wins, clr: dir === "CE" ? "#0284c7" : "#e11d48" };
+  }), [rows]);
+  const peak  = useMemo(() => Math.max(...curve.map(d => d.cumLot), 0), [curve]);
+  const maxDD = useMemo(() => { let p = -Infinity, dd = 0; for (const { cumLot: v } of curve) { if (v > p) p = v; const d = p - v; if (d > dd) dd = d; } return dd; }, [curve]);
+
+  if (!rows.length) return null;
+  const H = (t: string, s?: string) => (
+    <div className="flex items-center gap-2 mb-3">
+      <span className="text-[9px] font-bold tracking-[2px]" style={{ ...MONO, color: ACCENT }}>▶</span>
+      <span className="text-[9px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>{t}</span>
+      {s && <span className="text-[8px]" style={{ ...MONO, color: muted }}>· {s}</span>}
+    </div>
+  );
+  const tblHdr = (...cols: string[]) => (
+    <tr style={{ background: isDark ? "#080d14" : "#f0f4f8", borderBottom: `2px solid ${border}` }}>
+      {cols.map(c => <th key={c} className="px-3 py-2 text-left text-[7px] font-bold tracking-[1.5px]" style={{ ...MONO, color: muted }}>{c}</th>)}
+    </tr>
+  );
+
+  return (
+    <div className="flex flex-col gap-5 pt-2">
+
+      {/* ── Equity Curve ── */}
+      <div>
+        {H("EQUITY CURVE", `${rows.length} trades · hover to inspect`)}
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+          <div className="p-3 pb-1"><EquityCurveChart data={curve} isDark={isDark} /></div>
+          <StatsRow isDark={isDark} border={border} cols={[
+            { label: "PEAK P&L",      val: fmtIndianFull(peak),                                              color: "#16a34a"  },
+            { label: "MAX DRAWDOWN",  val: maxDD > 0 ? fmtIndianFull(-maxDD) : "—",                         color: "#e11d48"  },
+            { label: "FINAL P&L",     val: fmtIndianFull(curve[curve.length - 1]?.cumLot ?? 0),              color: pnlColor(curve[curve.length - 1]?.cumLot ?? 0) },
+            { label: "RECOVERY RATE", val: peak > 0 && maxDD > 0 ? `${((peak / (peak + maxDD)) * 100).toFixed(0)}%` : "—", color: "#b45309" },
+          ]} />
+        </div>
+      </div>
+
+      {/* ── Risk Metrics ── */}
+      <div>
+        {H("RISK METRICS", "profit factor · sharpe · sortino · expectancy")}
+        <StatsRow isDark={isDark} border={border} cols={[
+          { label: "PROFIT FACTOR",  val: rMetrics.profitFactor >= 999 ? "∞" : rMetrics.profitFactor.toFixed(2), color: rMetrics.profitFactor >= 1.5 ? "#16a34a" : "#e11d48" },
+          { label: "SHARPE RATIO",   val: rMetrics.sharpe.toFixed(2),  color: rMetrics.sharpe >= 1 ? "#16a34a" : rMetrics.sharpe >= 0 ? "#d97706" : "#e11d48" },
+          { label: "SORTINO RATIO",  val: rMetrics.sortino.toFixed(2), color: rMetrics.sortino >= 1.5 ? "#16a34a" : rMetrics.sortino >= 0 ? "#d97706" : "#e11d48" },
+          { label: "EXPECTANCY",     val: fmtIndianFull(rMetrics.expectancy), color: pnlColor(rMetrics.expectancy) },
+          { label: "AVG WIN",        val: rMetrics.avgWin  > 0 ? fmtIndianFull(rMetrics.avgWin)  : "—", color: "#16a34a" },
+          { label: "AVG LOSS",       val: rMetrics.avgLoss < 0 ? fmtIndianFull(rMetrics.avgLoss) : "—", color: "#e11d48" },
+        ]} />
+      </div>
+
+      {/* ── Streaks + CE/PE ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        {/* Streaks */}
+        <div>
+          {H("STREAK TRACKER")}
+          <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+            <div className="grid grid-cols-2" style={{ gap: "1px", background: border }}>
+              {[
+                { label: "CURRENT STREAK", val: streaks.currentType === "N" ? "—" : `${streaks.current} ${streaks.currentType}`, color: streaks.currentType === "W" ? "#16a34a" : streaks.currentType === "L" ? "#e11d48" : muted, sub: streaks.currentType === "W" ? "🔥 on fire" : streaks.currentType === "L" ? "❄️ cold" : "no trades" },
+                { label: "BEST WIN RUN",   val: `${streaks.bestWin}W`,  color: "#16a34a", sub: "consecutive wins"   },
+                { label: "WORST LOSS RUN", val: `${streaks.bestLoss}L`, color: "#e11d48", sub: "consecutive losses" },
+                { label: "CLOSED TRADES",  val: `${rows.filter(r => r.Status !== "ACTIVE").length}`, color: isDark ? "#94a3b8" : "#475569", sub: "excl. active" },
+              ].map(({ label, val, color: c, sub }) => (
+                <div key={label} className="px-3 py-2.5" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
+                  <div className="text-[7px] tracking-[1.5px] mb-1 uppercase" style={{ ...MONO, color: muted }}>{label}</div>
+                  <div className="text-[18px] font-bold leading-tight" style={{ ...BEBAS, color: c }}>{val}</div>
+                  <div className="text-[7px] mt-0.5" style={{ ...MONO, color: muted }}>{sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* CE vs PE */}
+        <div>
+          {H("CE vs PE SPLIT")}
+          <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+            <div className="grid grid-cols-2" style={{ gap: "1px", background: border }}>
+              {dirStats.map(({ dir, count, pnl, wins, clr }) => (
+                <div key={dir} className="px-3 py-3 flex flex-col gap-1" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-sm inline-flex w-fit mb-1"
+                    style={{ ...MONO, background: `${clr}18`, color: clr, border: `1px solid ${clr}30` }}>{dir}</span>
+                  <div className="text-[16px] font-bold" style={{ ...BEBAS, color: pnlColor(pnl) }}>{fmtIndianFull(pnl)}</div>
+                  <div className="text-[8px]" style={{ ...MONO, color: muted }}>{count} trades · {wins}W / {count - wins}L</div>
+                  <div className="text-[9px] font-bold" style={{ ...MONO, color: count > 0 && wins / count >= 0.7 ? "#16a34a" : "#e11d48" }}>
+                    {count > 0 ? `${((wins / count) * 100).toFixed(0)}% WR` : "—"}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <StatsRow isDark={isDark} border={border} cols={[
+              { label: "BEST DIRECTION", val: (() => { const [a, b] = dirStats; if (!a.count && !b.count) return "—"; if (!a.count) return b.dir; if (!b.count) return a.dir; return a.pnl >= b.pnl ? a.dir : b.dir; })(), color: (() => { const [a, b] = dirStats; return a.pnl >= b.pnl ? a.clr : b.clr; })() },
+              { label: "CE TRADES",  val: `${dirStats[0].count}`, color: "#0284c7"  },
+              { label: "PE TRADES",  val: `${dirStats[1].count}`, color: "#e11d48"  },
+              { label: "CE:PE RATIO", val: dirStats[1].count > 0 ? `${(dirStats[0].count / dirStats[1].count).toFixed(1)}:1` : "—", color: isDark ? "#94a3b8" : "#475569" },
+            ]} />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Concept Performance ── */}
+      <div>
+        {H("CONCEPT PERFORMANCE", `${concepts.length} concepts`)}
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+          <div className="overflow-x-auto">
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 500 }}>
+              <thead>{tblHdr("CONCEPT", "TRADES", "WIN", "LOSS", "WIN %", "AVG P&L", "NET LOT P&L")}</thead>
+              <tbody>
+                {concepts.map((cs, i) => {
+                  const wr = cs.trades > 0 ? (cs.wins / cs.trades) * 100 : 0;
+                  const avg = cs.trades > 0 ? cs.pnl / cs.trades : 0;
+                  return (
+                    <tr key={cs.concept} style={{ background: i % 2 === 0 ? (isDark ? "#0a0f16" : "#fff") : (isDark ? "#0d1420" : "#fafafa"), borderBottom: `1px solid ${isDark ? "#0f1923" : "#f1f5f9"}` }}>
+                      <td className="px-3 py-2"><span className="text-[9px] font-bold px-1.5 py-0.5 rounded-sm" style={{ ...MONO, background: `${ACCENT}15`, color: ACCENT }}>{cs.concept}</span></td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color }}>{cs.trades}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: "#16a34a" }}>{cs.wins}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: "#e11d48" }}>{cs.losses}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: wr >= 70 ? "#16a34a" : "#e11d48" }}>{wr.toFixed(0)}%</td>
+                      <td className="px-3 py-2 text-[9px] font-bold" style={{ ...MONO, color: pnlColor(avg) }}>{fmtIndianFull(avg)}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: pnlColor(cs.pnl) }}>{fmtIndianFull(cs.pnl)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* ── R-Multiple Distribution ── */}
+      <div>
+        {H("R-MULTIPLE DISTRIBUTION", "1R = avg loss · positive = profit multiples")}
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+          <div className="p-3 pb-1"><RMultipleChart metrics={rMetrics} isDark={isDark} /></div>
+          <StatsRow isDark={isDark} border={border} cols={[
+            { label: "AVG R (WINS)",  val: rMetrics.avgWin  > 0 && rMetrics.avgLoss < 0 ? `${(rMetrics.avgWin / Math.abs(rMetrics.avgLoss)).toFixed(1)}R` : "—", color: "#16a34a" },
+            { label: "RISK:REWARD",   val: rMetrics.avgWin  > 0 && rMetrics.avgLoss < 0 ? `1 : ${(rMetrics.avgWin / Math.abs(rMetrics.avgLoss)).toFixed(1)}` : "—", color: "#0284c7" },
+            { label: "EXPECTANCY/R",  val: rMetrics.avgLoss < 0 ? `${(rMetrics.expectancy / Math.abs(rMetrics.avgLoss)).toFixed(2)}R` : "—", color: pnlColor(rMetrics.expectancy) },
+          ]} />
+        </div>
+      </div>
+
+      {/* ── Time Analysis ── */}
+      <div>
+        {H("ENTRY TIME ANALYSIS", "best hours to trade")}
+        <div className="rounded-xl border overflow-hidden" style={{ borderColor: border, background: cardBg }}>
+          <div className="overflow-x-auto">
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 400 }}>
+              <thead>{tblHdr("ENTRY", "TRADES", "WIN", "LOSS", "WIN %", "NET LOT P&L")}</thead>
+              <tbody>
+                {hours.map((ts, i) => {
+                  const wr    = ts.trades > 0 ? (ts.wins / ts.trades) * 100 : 0;
+                  const maxAb = Math.max(...hours.map(h => Math.abs(h.pnl)), 1);
+                  const barW  = (Math.abs(ts.pnl) / maxAb) * 100;
+                  return (
+                    <tr key={ts.hour} style={{ background: i % 2 === 0 ? (isDark ? "#0a0f16" : "#fff") : (isDark ? "#0d1420" : "#fafafa"), borderBottom: `1px solid ${isDark ? "#0f1923" : "#f1f5f9"}` }}>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color }}>{ts.label}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color }}>{ts.trades}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: "#16a34a" }}>{ts.wins}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: "#e11d48" }}>{ts.trades - ts.wins}</td>
+                      <td className="px-3 py-2 text-[10px] font-bold" style={{ ...MONO, color: wr >= 70 ? "#16a34a" : "#e11d48" }}>{wr.toFixed(0)}%</td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="h-2 rounded-full overflow-hidden flex-1" style={{ background: isDark ? "#1e2a3a" : "#e2e8f0", minWidth: 60 }}>
+                            <div style={{ width: `${barW}%`, height: "100%", background: pnlColor(ts.pnl), borderRadius: 9999 }} />
+                          </div>
+                          <span className="text-[9px] font-bold whitespace-nowrap" style={{ ...MONO, color: pnlColor(ts.pnl) }}>{fmtIndianFull(ts.pnl)}</span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Position Sizing Calculator ── */}
+      <div>
+        {H("RISK CALCULATOR", "position sizing based on account size")}
+        <RiskCalculator isDark={isDark} border={border} color={color} muted={muted} />
+      </div>
+
+    </div>
+  );
+}
+
 type DirFilter    = "ALL" | "CE" | "PE";
 type ResultFilter = "ALL" | "T1" | "T2" | "PROFIT" | "LOSS";
 type MaxPtsFilter = "ALL" | "5" | "10" | "15" | "20" | "25" | "30";
@@ -516,6 +991,31 @@ function JournalTradesSection({ isDark, border, color, muted }: {
   const [maxPtsFilter, setMaxPtsF] = useState<MaxPtsFilter>("ALL");
   const [visCols,     setVisCols]  = useState<Set<ColKey>>(new Set(COL_DEFS.map(c => c.key)));
   const [pageSize,    setPageSz]   = useState(10);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  // SSR-safe: init empty, read localStorage after mount to avoid hydration mismatch
+  const [notes, setNotes]           = useState<Record<string, string>>({});
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    try { setNotes(JSON.parse(localStorage.getItem("smc_trade_notes")   ?? "{}")); } catch {}
+    try { setPinnedKeys(new Set(JSON.parse(localStorage.getItem("smc_pinned_trades") ?? "[]"))); } catch {}
+  }, []);
+  const [editingNote, setEditingNote]   = useState<string | null>(null);
+  const [showPinnedOnly, setShowPinnedOnly] = useState(false);
+
+  const noteKey = (r: Row) => `${r._date ?? ""}_${r.EntryTime ?? ""}_${r.Strike ?? ""}_${r.Direction ?? ""}`;
+  const saveNote = (key: string, val: string) => {
+    const next = { ...notes, [key]: val };
+    setNotes(next);
+    localStorage.setItem("smc_trade_notes", JSON.stringify(next));
+  };
+  const togglePin = (key: string) => {
+    setPinnedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      localStorage.setItem("smc_pinned_trades", JSON.stringify([...next]));
+      return next;
+    });
+  };
   const filterRef = useRef<HTMLDivElement>(null);
 
   const dynTCOLS = "30px " + COL_DEFS.filter(c => visCols.has(c.key)).map(c => c.w).join(" ");
@@ -564,6 +1064,7 @@ function JournalTradesSection({ isDark, border, color, muted }: {
   }, [tradeDates]);
 
   const filtered = useMemo(() => allRows.filter(r => {
+    if (showPinnedOnly && !pinnedKeys.has(noteKey(r)))                        return false;
     if (monthFilter !== "ALL" && !r._date?.startsWith(monthFilter))          return false;
     if (dirFilter !== "ALL" && r.Direction !== dirFilter)                     return false;
     if (resFilter === "T1"     && r.T1Hit !== "Y")                            return false;
@@ -787,6 +1288,44 @@ function JournalTradesSection({ isDark, border, color, muted }: {
               </button>
             )}
 
+            {/* ── Pinned filter ── */}
+            {pinnedKeys.size > 0 && (
+              <button
+                onClick={() => setShowPinnedOnly(v => !v)}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border cursor-pointer transition-colors flex-shrink-0"
+                style={{ ...MONO, background: showPinnedOnly ? "#d97706" + "18" : (isDark ? "#0f1923" : "#f1f5f9"), borderColor: showPinnedOnly ? "#d97706" : border, color: showPinnedOnly ? "#d97706" : muted }}>
+                <span className="text-[10px]">📌</span>
+                <span className="text-[7px] font-bold">PINNED ({pinnedKeys.size})</span>
+              </button>
+            )}
+
+            {/* ── Analytics + Export ── */}
+            <button
+              onClick={() => setShowAnalytics(v => !v)}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg border cursor-pointer transition-colors flex-shrink-0"
+              style={{ ...MONO, background: showAnalytics ? `${ACCENT}18` : (isDark ? "#0f1923" : "#f1f5f9"), borderColor: showAnalytics ? ACCENT : border, color: showAnalytics ? ACCENT : muted }}>
+              <span className="text-[10px]">📊</span>
+              <span className="text-[7px] font-bold">{showAnalytics ? "HIDE ANALYTICS" : "ANALYTICS"}</span>
+            </button>
+            {!loading && allRows.length > 0 && (
+              <button
+                onClick={() => exportToCSV(filtered)}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border cursor-pointer transition-colors flex-shrink-0"
+                style={{ ...MONO, background: isDark ? "#0f1923" : "#f1f5f9", borderColor: border, color: muted }}>
+                <span className="text-[10px]">⬇</span>
+                <span className="text-[7px] font-bold">CSV</span>
+              </button>
+            )}
+            {!loading && allRows.length > 0 && (
+              <button
+                onClick={() => exportToJSON(filtered, { wins, losses, lotPnL, wr })}
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border cursor-pointer transition-colors flex-shrink-0"
+                style={{ ...MONO, background: isDark ? "#0f1923" : "#f1f5f9", borderColor: border, color: muted }}>
+                <span className="text-[10px]">📋</span>
+                <span className="text-[7px] font-bold">JSON</span>
+              </button>
+            )}
+
             {/* Summary */}
             {wr !== null && (
               <div className="ml-auto flex items-center gap-3 flex-shrink-0">
@@ -958,7 +1497,43 @@ function JournalTradesSection({ isDark, border, color, muted }: {
                     style={{ gridTemplateColumns: dynTCOLS, background: rowBg, borderColor: isDark ? "#0f1923" : "#f1f5f9", minHeight: 36 }}>
 
                     {/* # always visible */}
-                    <div className="px-2 text-[9px] tabular-nums" style={{ ...MONO, color: muted }}>{absIdx}</div>
+                    <div className="px-2 text-[9px] tabular-nums flex items-center gap-1" style={{ ...MONO, color: muted }}>
+                      {absIdx}
+                      {(() => {
+                        const nk = noteKey(r);
+                        const hasNote = !!notes[nk];
+                        const isPinned = pinnedKeys.has(nk);
+                        return (
+                          <>
+                            <button
+                              title={hasNote ? notes[nk] : "Add note"}
+                              onClick={() => setEditingNote(editingNote === nk ? null : nk)}
+                              style={{ fontSize: 10, opacity: hasNote ? 1 : 0.35, cursor: "pointer", background: "none", border: "none", padding: 0, lineHeight: 1 }}>
+                              {hasNote ? "📝" : "✎"}
+                            </button>
+                            <button
+                              title={isPinned ? "Unpin trade" : "Pin trade"}
+                              onClick={() => togglePin(nk)}
+                              style={{ fontSize: 9, opacity: isPinned ? 1 : 0.25, cursor: "pointer", background: "none", border: "none", padding: 0, lineHeight: 1, color: "#d97706" }}>
+                              📌
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
+                    {editingNote === noteKey(r) && (
+                      <div style={{ gridColumn: `1 / -1`, padding: "4px 8px 6px", background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                        <textarea
+                          autoFocus
+                          rows={2}
+                          value={notes[noteKey(r)] ?? ""}
+                          onChange={e => saveNote(noteKey(r), e.target.value)}
+                          placeholder="Add trade note…"
+                          className="w-full text-[9px] rounded px-2 py-1 outline-none resize-none"
+                          style={{ ...MONO, background: isDark ? "#0d1420" : "#fff", border: `1px solid ${ACCENT}50`, color, fontFamily: "'Space Mono',monospace" }}
+                        />
+                      </div>
+                    )}
 
                     {/* DATE */}
                     {visCols.has("date") && (
@@ -1143,6 +1718,11 @@ function JournalTradesSection({ isDark, border, color, muted }: {
           </div>
 
         </div>
+      )}
+
+      {/* ── Analytics Panel ── */}
+      {showAnalytics && allRows.length > 0 && (
+        <AnalyticsPanel rows={filtered.length > 0 ? filtered : allRows} isDark={isDark} border={border} color={color} muted={muted} />
       )}
     </div>
   );

@@ -1071,6 +1071,97 @@ function OptionsPageInner() {
     );
   }
 
+  // ── Session Countdown Timer ───────────────────────────────────────────────────
+  const [sessionTimer, setSessionTimer] = useState("");
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      const h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+      const nowSecs   = h * 3600 + m * 60 + s;
+      const openSecs  = 9  * 3600 + 15 * 60;
+      const closeSecs = 15 * 3600 + 30 * 60;
+      if (nowSecs < openSecs) {
+        const rem = openSecs - nowSecs;
+        setSessionTimer(`OPENS ${Math.floor(rem / 3600)}h ${Math.floor((rem % 3600) / 60)}m`);
+      } else if (nowSecs < closeSecs) {
+        const rem = closeSecs - nowSecs;
+        setSessionTimer(`CLOSES ${Math.floor(rem / 3600) > 0 ? Math.floor(rem / 3600) + "h " : ""}${Math.floor((rem % 3600) / 60)}m ${rem % 60}s`);
+      } else {
+        setSessionTimer("CLOSED");
+      }
+    };
+    tick(); const sid = setInterval(tick, 1000); return () => clearInterval(sid);
+  }, []);
+
+  // ── VIX fetch (Yahoo Finance) ─────────────────────────────────────────────────
+  const [vixValue, setVixValue] = useState<number | null>(null);
+  useEffect(() => {
+    const fetchVix = () =>
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX?interval=1d&range=1d", { cache: "no-store" })
+        .then(r => r.json())
+        .then(d => { const v = d?.chart?.result?.[0]?.meta?.regularMarketPrice; if (v) setVixValue(v); })
+        .catch(() => {});
+    fetchVix();
+    const vid = setInterval(fetchVix, 5 * 60 * 1000);
+    return () => clearInterval(vid);
+  }, []);
+
+  // ── PCR from existing options chain ──────────────────────────────────────────
+  const pcrValue = useMemo(() => data?.pcrOI ?? null, [data]);
+
+  // ── Hydration-safe mounted flag ───────────────────────────────────────────────
+  // All browser-only UI (localStorage state, Notification API) must wait until mounted
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // ── Sound Alert ───────────────────────────────────────────────────────────────
+  const [soundEnabled, setSoundEnabled] = useState(false); // SSR-safe default
+  useEffect(() => {
+    try { setSoundEnabled(localStorage.getItem("smc_sound") === "1"); } catch {}
+  }, []);
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    try { localStorage.setItem("smc_sound", next ? "1" : "0"); } catch {}
+  };
+  const playBeep = useCallback(() => {
+    try {
+      const ctx  = new AudioContext();
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 880; osc.type = "sine";
+      gain.gain.setValueAtTime(0.25, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+      osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.5);
+    } catch {}
+  }, []);
+
+  // ── Browser Notifications ─────────────────────────────────────────────────────
+  const [notifEnabled, setNotifEnabled] = useState(false); // SSR-safe default
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      setNotifEnabled(true);
+    }
+  }, []);
+  const enableNotifications = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+    const perm = await Notification.requestPermission();
+    setNotifEnabled(perm === "granted");
+  }, []);
+  const prevAlertCount = useRef(0);
+  useEffect(() => {
+    const count = smcAlerts.length;
+    if (count > prevAlertCount.current) {
+      if (soundEnabled) playBeep();
+      if (notifEnabled && typeof Notification !== "undefined" && Notification.permission === "granted") {
+        const newCount = count - prevAlertCount.current;
+        try { new Notification("🔔 SMC Signal", { body: `${newCount} new signal${newCount > 1 ? "s" : ""} fired`, icon: "/logo.png" }); } catch {}
+      }
+    }
+    prevAlertCount.current = count;
+  }, [smcAlerts.length, soundEnabled, notifEnabled, playBeep]);
+
   // ── Avatar helper (used in header + drawer) ───────────────────────────────
   const profileInitials = kiteProfile
     ? kiteProfile.user_name
@@ -1327,6 +1418,57 @@ function OptionsPageInner() {
             />
             <span className="hidden sm:inline">{live ? "LIVE" : "PAUSED"}</span>
           </button>
+
+          {/* ── Session Timer ── */}
+          {sessionTimer && (
+            <div className="hidden sm:flex flex-col items-end leading-none flex-shrink-0">
+              <span className="text-[8px] font-bold tracking-[1px]"
+                style={{ ...MONO, color: sessionTimer === "CLOSED" ? "#e11d48" : sessionTimer.startsWith("OPENS") ? "#d97706" : "#16a34a" }}>
+                {sessionTimer}
+              </span>
+            </div>
+          )}
+
+          {/* ── VIX ── */}
+          {vixValue !== null && (
+            <div className="hidden md:flex flex-col items-center leading-none flex-shrink-0 px-2 py-1 rounded-sm"
+              style={{ background: vixValue > 20 ? "rgba(225,29,72,0.1)" : "rgba(22,163,74,0.1)" }}>
+              <span className="text-[7px] font-bold tracking-[1px]" style={{ ...MONO, color: "#64748b" }}>VIX</span>
+              <span className="text-[10px] font-bold" style={{ ...MONO, color: vixValue > 20 ? "#e11d48" : vixValue > 15 ? "#d97706" : "#16a34a" }}>
+                {vixValue.toFixed(2)}
+              </span>
+            </div>
+          )}
+
+          {/* ── PCR ── */}
+          {pcrValue !== null && (
+            <div className="hidden md:flex flex-col items-center leading-none flex-shrink-0 px-2 py-1 rounded-sm"
+              style={{ background: pcrValue > 1 ? "rgba(22,163,74,0.1)" : "rgba(225,29,72,0.1)" }}>
+              <span className="text-[7px] font-bold tracking-[1px]" style={{ ...MONO, color: "#64748b" }}>PCR</span>
+              <span className="text-[10px] font-bold" style={{ ...MONO, color: pcrValue > 1 ? "#16a34a" : "#e11d48" }}>
+                {pcrValue.toFixed(2)}
+              </span>
+            </div>
+          )}
+
+          {/* ── Sound + Notification toggles — only after hydration to avoid SSR mismatch ── */}
+          {mounted && (
+            <>
+              <button onClick={toggleSound} title={soundEnabled ? "Sound ON — click to mute" : "Sound OFF — click to enable"}
+                className="hidden sm:flex items-center justify-center w-7 h-7 rounded-sm border cursor-pointer flex-shrink-0"
+                style={{ background: soundEnabled ? "rgba(22,163,74,0.1)" : (isDark ? "#0f172a" : "#f8fafc"), borderColor: soundEnabled ? "#16a34a" : (isDark ? "#334155" : "#cbd5e1") }}>
+                <span style={{ fontSize: 13 }}>{soundEnabled ? "🔔" : "🔕"}</span>
+              </button>
+              {typeof Notification !== "undefined" && (
+                <button onClick={notifEnabled ? undefined : enableNotifications}
+                  title={notifEnabled ? "Notifications enabled" : "Enable browser notifications"}
+                  className="hidden sm:flex items-center justify-center w-7 h-7 rounded-sm border cursor-pointer flex-shrink-0"
+                  style={{ background: notifEnabled ? "rgba(22,163,74,0.1)" : (isDark ? "#0f172a" : "#f8fafc"), borderColor: notifEnabled ? "#16a34a" : (isDark ? "#334155" : "#cbd5e1") }}>
+                  <span style={{ fontSize: 11 }}>{notifEnabled ? "📲" : "📵"}</span>
+                </button>
+              )}
+            </>
+          )}
 
           {/* Today: day / date / market status — rightmost */}
           {(() => {
@@ -4804,7 +4946,17 @@ function SMCTableView({
   const total = wins + losses;
   const wr = total > 0 ? ((wins / total) * 100).toFixed(1) : null;
 
-  const LOT_QTY = LOT_SIZE * NUM_LOTS;
+  // ── Adjustable Lot Size (SSR-safe: init with constant, read localStorage after mount) ──
+  const [numLots, setNumLots] = useState(NUM_LOTS);
+  useEffect(() => {
+    try { const v = parseInt(localStorage.getItem("smc_num_lots") ?? ""); if (!isNaN(v) && v >= 1) setNumLots(v); } catch {}
+  }, []);
+  const LOT_QTY = LOT_SIZE * numLots;
+  const saveNumLots = (v: number) => {
+    const clamped = Math.max(1, Math.min(100, Math.round(v)));
+    setNumLots(clamped);
+    try { localStorage.setItem("smc_num_lots", String(clamped)); } catch {}
+  };
 
   useEffect(() => {
     const color = active > 0 ? "#16a34a" : "#dc2626";
@@ -4866,8 +5018,87 @@ function SMCTableView({
   const COLS =
     "40px 60px 1fr 150px 70px 70px 72px 72px 72px 90px 155px 80px 65px 130px 80px";
 
+  // ── Daily Target / Stop (SSR-safe: init 0, read localStorage after mount) ────
+  const [dailyTarget, setDailyTarget] = useState(0);
+  const [dailyStop,   setDailyStop]   = useState(0);
+  useEffect(() => {
+    try { const v = parseFloat(localStorage.getItem("smc_daily_target") ?? ""); if (!isNaN(v) && v > 0) setDailyTarget(v); } catch {}
+    try { const v = parseFloat(localStorage.getItem("smc_daily_stop")   ?? ""); if (!isNaN(v) && v > 0) setDailyStop(v);   } catch {}
+  }, []);
+  const [showDailySettings, setShowDailySettings] = useState(false);
+  const saveDailyTarget = (v: number) => { setDailyTarget(v); localStorage.setItem("smc_daily_target", String(v)); };
+  const saveDailyStop   = (v: number) => { setDailyStop(v);   localStorage.setItem("smc_daily_stop",   String(v)); };
+  const dailyPnL  = realizedLotPnl;
+  const targetHit = dailyTarget > 0 && dailyPnL >= dailyTarget;
+  const stopHit   = dailyStop   > 0 && dailyPnL <= -dailyStop;
+  const targetPct = dailyTarget > 0 ? Math.min((dailyPnL / dailyTarget) * 100, 100) : 0;
+  const stopPct   = dailyStop   > 0 ? Math.min((-dailyPnL / dailyStop)  * 100, 100) : 0;
+
+  // ── Consecutive loss alert ────────────────────────────────────────────────────
+  const consecutiveLosses = useMemo(() => {
+    const closed = tableAlerts.filter(a => a.status !== "ACTIVE");
+    if (closed.length < 3) return false;
+    return closed.slice(-3).every(a => (a.currentPnL ?? 0) < 0);
+  }, [tableAlerts]);
+
+  // ── Signal Score ──────────────────────────────────────────────────────────────
+  const signalScore = useCallback((a: { concepts?: string; rr?: { entry?: number; riskReward?: number }; time?: string }): number => {
+    let score = 5;
+    const concepts = a.concepts ? a.concepts.split(",").filter(Boolean).length : 0;
+    score += Math.min(concepts, 3);
+    const entry = a.rr?.entry ?? 0;
+    if (entry >= SMC_MIN_PREMIUM && entry <= SMC_MAX_PREMIUM) score += 1;
+    const h = a.time ? parseInt(a.time.split(":")[0], 10) : 0;
+    if (h === 9 || h === 10 || h === 14) score += 1;
+    if ((a.rr?.riskReward ?? 0) >= 2) score += 1;
+    return Math.min(score, 10);
+  }, []);
+
+  // ── Setup Heatmap ─────────────────────────────────────────────────────────────
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const heatmapData = useMemo(() => {
+    const closed = tableAlerts.filter(a => a.status !== "ACTIVE" && a.rr?.entry);
+    if (!closed.length) return null;
+    const strikes = [...new Set(closed.map(a => a.rr?.entry ? Math.round((a.rr.entry) / 50) * 50 : 0))].filter(Boolean).sort((a, b) => a - b).slice(0, 8);
+    const hours   = [9, 10, 11, 12, 13, 14, 15];
+    const grid: Record<string, { trades: number; wins: number }> = {};
+    for (const a of closed) {
+      const s = a.rr?.entry ? Math.round((a.rr.entry) / 50) * 50 : 0;
+      const h = a.time ? parseInt(a.time.split(":")[0], 10) : 0;
+      if (!strikes.includes(s) || !hours.includes(h)) continue;
+      const k = `${s}_${h}`;
+      if (!grid[k]) grid[k] = { trades: 0, wins: 0 };
+      grid[k].trades++;
+      if ((a.currentPnL ?? 0) >= 0) grid[k].wins++;
+    }
+    return { strikes, hours, grid };
+  }, [tableAlerts]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
+
+      {/* ── Circuit Breaker Overlay ── */}
+      {stopHit && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center"
+          style={{ background: "rgba(0,0,0,0.88)", backdropFilter: "blur(6px)" }}>
+          <div className="flex flex-col items-center gap-5 text-center px-6">
+            <div className="text-[56px] sm:text-[72px] font-bold leading-none"
+              style={{ fontFamily: "'Bebas Neue',sans-serif", color: "#e11d48" }}>TRADING PAUSED</div>
+            <div className="text-[12px] tracking-[2px] font-bold"
+              style={{ ...MONO, color: "#94a3b8" }}>DAILY STOP LOSS HIT · PROTECT YOUR CAPITAL</div>
+            <div className="text-[11px]" style={{ ...MONO, color: "#64748b" }}>
+              Realized P&L: <span style={{ color: "#e11d48", fontWeight: "bold" }}>{fmtLotPnl(dailyPnL)}</span>
+              {" · "}Daily Stop: <span style={{ color: "#e11d48", fontWeight: "bold" }}>−{fmtLotPnl(dailyStop)}</span>
+            </div>
+            <button onClick={() => saveDailyStop(0)}
+              className="px-6 py-2.5 rounded-sm border text-[11px] font-bold tracking-[1px] cursor-pointer"
+              style={{ ...MONO, borderColor: "#e11d48", color: "#e11d48", background: "rgba(225,29,72,0.12)" }}>
+              ✕ CLEAR STOP & RESUME TRADING
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Mode switcher + action bar ── */}
       <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 bg-white border-b border-[#cbd5e1] flex-shrink-0 overflow-x-auto">
         {/* LIVE / BACKTEST toggle */}
@@ -5663,7 +5894,7 @@ function SMCTableView({
                   "T1",
                   "T2",
                   "STATUS",
-                  `P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
+                  `P&L · LOT (${numLots}×${LOT_SIZE}=${LOT_QTY})`,
                   "CHARGES",
                   "MAX PTS",
                   "MAX PROFITS",
@@ -5753,12 +5984,19 @@ function SMCTableView({
                       className="grid border-b border-[#f1f5f9] hover:bg-[#f0f4ff] transition-colors items-center"
                       style={{ gridTemplateColumns: COLS, background: rowBg }}
                     >
-                      {/* # */}
-                      <div
-                        className="px-2 py-2.5 text-[9px] text-[#94a3b8]"
-                        style={MONO}
-                      >
-                        {idx + 1}
+                      {/* # + Signal Score */}
+                      <div className="px-2 py-2.5 flex flex-col items-center gap-0.5" style={MONO}>
+                        <span className="text-[9px] text-[#94a3b8]">{idx + 1}</span>
+                        {(() => {
+                          const sc = signalScore(a);
+                          const scoreClr = sc >= 8 ? "#16a34a" : sc >= 6 ? "#d97706" : "#e11d48";
+                          return (
+                            <span className="text-[7px] font-bold px-1 py-0.5 rounded-sm w-full text-center"
+                              style={{ ...MONO, background: `${scoreClr}18`, color: scoreClr, border: `1px solid ${scoreClr}30` }}>
+                              {sc}/10
+                            </span>
+                          );
+                        })()}
                       </div>
 
                       {/* TIME */}
@@ -6147,6 +6385,159 @@ function SMCTableView({
             >
               ◉ BACKTEST {histDate} · expiry {expiry} · all prices from
               historical candles · EOD = position open at 15:30
+            </div>
+          )}
+          {/* ── Daily Target / Stop ── */}
+          {(dailyTarget > 0 || dailyStop > 0) && (
+            <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b"
+              style={{ borderColor: isDark ? "#1e2a3a" : "#e2e8f0", background: isDark ? "#080b0f" : "#f8fafc" }}>
+              {dailyTarget > 0 && (
+                <div className="flex items-center gap-2 flex-1 min-w-[160px]">
+                  <span className="text-[7px] font-bold tracking-[1.5px] whitespace-nowrap" style={{ ...MONO, color: targetHit ? "#16a34a" : "#64748b" }}>
+                    {targetHit ? "✓ TARGET HIT" : "DAILY TARGET"}
+                  </span>
+                  <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: isDark ? "#1e2a3a" : "#e2e8f0", minWidth: 60 }}>
+                    <div style={{ width: `${Math.max(0, targetPct)}%`, height: "100%", background: targetHit ? "#16a34a" : "#22c55e", borderRadius: 9999, transition: "width 0.3s" }} />
+                  </div>
+                  <span className="text-[8px] font-bold whitespace-nowrap" style={{ ...MONO, color: targetHit ? "#16a34a" : "#64748b" }}>
+                    {fmtLotPnl(dailyPnL)} / +{fmtLotPnl(dailyTarget)}
+                  </span>
+                </div>
+              )}
+              {dailyStop > 0 && (
+                <div className="flex items-center gap-2 flex-1 min-w-[160px]">
+                  <span className="text-[7px] font-bold tracking-[1.5px] whitespace-nowrap" style={{ ...MONO, color: stopHit ? "#e11d48" : "#64748b" }}>
+                    {stopHit ? "✗ STOP HIT" : "DAILY STOP"}
+                  </span>
+                  <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ background: isDark ? "#1e2a3a" : "#e2e8f0", minWidth: 60 }}>
+                    <div style={{ width: `${Math.max(0, stopPct)}%`, height: "100%", background: stopHit ? "#e11d48" : "#f97316", borderRadius: 9999, transition: "width 0.3s" }} />
+                  </div>
+                  <span className="text-[8px] font-bold whitespace-nowrap" style={{ ...MONO, color: stopHit ? "#e11d48" : "#64748b" }}>
+                    {fmtLotPnl(dailyPnL)} / -{fmtLotPnl(dailyStop)}
+                  </span>
+                </div>
+              )}
+              <button onClick={() => setShowDailySettings(v => !v)}
+                className="text-[7px] font-bold px-2 py-1 rounded-sm border cursor-pointer flex-shrink-0"
+                style={{ ...MONO, borderColor: "#7c3aed", color: "#7c3aed", background: "#7c3aed10" }}>⚙ EDIT</button>
+            </div>
+          )}
+          {showDailySettings && (
+            <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b"
+              style={{ borderColor: isDark ? "#1e2a3a" : "#e2e8f0", background: isDark ? "#0a0f16" : "#fff" }}>
+              <span className="text-[8px] font-bold tracking-[1.5px]" style={{ ...MONO, color: isDark ? "#94a3b8" : "#475569" }}>DAILY LIMITS</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[7px]" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>TARGET ₹</span>
+                <input type="number" min={0} value={dailyTarget || ""} placeholder="e.g. 5000"
+                  onChange={e => saveDailyTarget(parseFloat(e.target.value) || 0)}
+                  className="w-24 text-[9px] px-2 py-1 rounded-sm outline-none"
+                  style={{ ...MONO, background: isDark ? "#0f1923" : "#f8fafc", border: `1px solid ${isDark ? "#2a3a4a" : "#cbd5e1"}`, color: isDark ? "#e2e8f0" : "#1e293b" }} />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[7px]" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>STOP ₹</span>
+                <input type="number" min={0} value={dailyStop || ""} placeholder="e.g. 3000"
+                  onChange={e => saveDailyStop(parseFloat(e.target.value) || 0)}
+                  className="w-24 text-[9px] px-2 py-1 rounded-sm outline-none"
+                  style={{ ...MONO, background: isDark ? "#0f1923" : "#f8fafc", border: `1px solid ${isDark ? "#2a3a4a" : "#cbd5e1"}`, color: isDark ? "#e2e8f0" : "#1e293b" }} />
+              </div>
+              {/* ── Lots adjuster ── */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[7px]" style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>LOTS</span>
+                <div className="flex items-center gap-0.5 border rounded-sm overflow-hidden" style={{ borderColor: isDark ? "#2a3a4a" : "#cbd5e1" }}>
+                  <button onClick={() => saveNumLots(numLots - 1)}
+                    className="w-6 h-6 text-[11px] font-bold flex items-center justify-center cursor-pointer"
+                    style={{ ...MONO, background: isDark ? "#0f1923" : "#f8fafc", color: isDark ? "#94a3b8" : "#475569" }}>−</button>
+                  <span className="px-2 text-[9px] font-bold text-center tabular-nums min-w-[28px]"
+                    style={{ ...MONO, color: isDark ? "#e2e8f0" : "#1e293b", background: isDark ? "#0d1420" : "#fff" }}>
+                    {numLots}
+                  </span>
+                  <button onClick={() => saveNumLots(numLots + 1)}
+                    className="w-6 h-6 text-[11px] font-bold flex items-center justify-center cursor-pointer"
+                    style={{ ...MONO, background: isDark ? "#0f1923" : "#f8fafc", color: isDark ? "#94a3b8" : "#475569" }}>+</button>
+                </div>
+                <span className="text-[7px]" style={{ ...MONO, color: isDark ? "#4a6080" : "#94a3b8" }}>
+                  × {LOT_SIZE} = {LOT_QTY} qty
+                </span>
+              </div>
+              <button onClick={() => { saveDailyTarget(0); saveDailyStop(0); setShowDailySettings(false); }}
+                className="text-[7px] font-bold px-2 py-1 rounded-sm border cursor-pointer"
+                style={{ ...MONO, borderColor: "#e11d48", color: "#e11d48", background: isDark ? "#2d0505" : "#fff5f5" }}>✕ Clear</button>
+              <button onClick={() => setShowDailySettings(false)}
+                className="text-[7px] font-bold px-2 py-1 rounded-sm border cursor-pointer"
+                style={{ ...MONO, borderColor: "#7c3aed", color: "#7c3aed", background: "#7c3aed10" }}>✓ Done</button>
+            </div>
+          )}
+          {!dailyTarget && !dailyStop && (
+            <div className="flex items-center justify-between px-4 py-1.5 border-b"
+              style={{ borderColor: isDark ? "#1e2a3a" : "#e2e8f0", background: isDark ? "#080b0f" : "#f8fafc" }}>
+              <button onClick={() => setShowDailySettings(true)}
+                className="text-[7px] font-bold px-2 py-1 rounded-sm border cursor-pointer"
+                style={{ ...MONO, borderColor: isDark ? "#2a3a4a" : "#cbd5e1", color: isDark ? "#4a6080" : "#94a3b8", background: "transparent" }}>
+                ⚙ Set Daily Target / Stop
+              </button>
+              {heatmapData && (
+                <button onClick={() => setShowHeatmap(v => !v)}
+                  className="text-[7px] font-bold px-2 py-1 rounded-sm border cursor-pointer"
+                  style={{ ...MONO, borderColor: showHeatmap ? "#7c3aed" : (isDark ? "#2a3a4a" : "#cbd5e1"), color: showHeatmap ? "#7c3aed" : (isDark ? "#4a6080" : "#94a3b8"), background: showHeatmap ? "#7c3aed10" : "transparent" }}>
+                  🔥 SETUP HEATMAP
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ── Consecutive Loss Alert ── */}
+          {consecutiveLosses && (
+            <div className="flex items-center gap-2 px-4 py-2 border-b"
+              style={{ borderColor: "#e11d48", background: isDark ? "#2d0505" : "#fff5f5" }}>
+              <span style={{ fontSize: 14 }}>⚠️</span>
+              <span className="text-[8px] font-bold tracking-[1px]" style={{ ...MONO, color: "#e11d48" }}>
+                3 CONSECUTIVE LOSSES · Consider stepping back and reviewing your setup
+              </span>
+            </div>
+          )}
+
+          {/* ── Setup Heatmap ── */}
+          {showHeatmap && heatmapData && (
+            <div className="px-4 py-3 border-b overflow-x-auto"
+              style={{ borderColor: isDark ? "#1e2a3a" : "#e2e8f0", background: isDark ? "#080b0f" : "#f8fafc" }}>
+              <div className="text-[7px] font-bold tracking-[1.5px] mb-2" style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>
+                🔥 SETUP HEATMAP — ENTRY PRICE × TIME (win rate)
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: `60px repeat(${heatmapData.hours.length}, 44px)`, gap: 3, minWidth: 400 }}>
+                {/* Header row */}
+                <div />
+                {heatmapData.hours.map(h => (
+                  <div key={h} className="text-center text-[7px] font-bold py-1"
+                    style={{ ...MONO, color: isDark ? "#64748b" : "#94a3b8" }}>
+                    {h < 12 ? `${h}AM` : h === 12 ? "12PM" : `${h - 12}PM`}
+                  </div>
+                ))}
+                {/* Data rows */}
+                {heatmapData.strikes.map(strike => (
+                  <>
+                    <div key={`s${strike}`} className="text-[7px] font-bold flex items-center"
+                      style={{ ...MONO, color: isDark ? "#94a3b8" : "#475569" }}>
+                      ₹{strike}
+                    </div>
+                    {heatmapData.hours.map(h => {
+                      const cell = heatmapData.grid[`${strike}_${h}`];
+                      const wr   = cell && cell.trades > 0 ? cell.wins / cell.trades : null;
+                      const bg   = wr === null ? (isDark ? "rgba(30,42,58,0.4)" : "rgba(241,245,249,1)")
+                        : wr >= 0.7 ? `rgba(22,163,74,${0.2 + wr * 0.5})`
+                        : wr >= 0.5 ? `rgba(217,119,6,${0.2 + wr * 0.4})`
+                        : `rgba(225,29,72,${0.2 + (1 - wr) * 0.4})`;
+                      return (
+                        <div key={`${strike}_${h}`}
+                          className="rounded text-center text-[8px] font-bold py-1.5"
+                          title={cell ? `${cell.wins}W / ${cell.trades - cell.wins}L` : "No data"}
+                          style={{ ...MONO, background: bg, color: wr === null ? (isDark ? "#2a3a4a" : "#cbd5e1") : wr >= 0.7 ? "#16a34a" : wr >= 0.5 ? "#d97706" : "#e11d48" }}>
+                          {wr !== null ? `${(wr * 100).toFixed(0)}%` : "—"}
+                        </div>
+                      );
+                    })}
+                  </>
+                ))}
+              </div>
             </div>
           )}
           <div

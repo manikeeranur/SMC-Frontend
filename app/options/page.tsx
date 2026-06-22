@@ -984,11 +984,10 @@ function OptionsPageInner() {
   }
 
   // ── Redirect to login if not authenticated ──────────────────────────────────
-  useEffect(() => {
-    if (!isDemoMode && hydrated && !authenticated) {
-      router.replace("/");
-    }
-  }, [authenticated, hydrated, router]);
+  if (!isDemoMode && hydrated && !authenticated) {
+    router.replace("/");
+    return null;
+  }
 
   // ── Derived values ─────────────────────────────────────────────────────────
   const { pcrVol, pcrOI, totalCEOI, totalPEOI } = data
@@ -1005,6 +1004,73 @@ function OptionsPageInner() {
     : [];
 
   // ── Login loading overlay ───────────────────────────────────────────────────
+  if (justLoggedIn) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
+        style={{ background: "#050a0f" }}
+      >
+        {/* Grid bg */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(2,132,199,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(2,132,199,0.04) 1px, transparent 1px)",
+            backgroundSize: "48px 48px",
+          }}
+        />
+        <div className="relative flex flex-col items-center gap-6">
+          {/* Brand */}
+          <div
+            className="text-[48px] leading-none tracking-[2px]"
+            style={BEBAS}
+          >
+            <span className="text-white">ALGO</span>
+            <span style={{ color: "#0284c7" }}>.</span>
+            <span style={{ color: "#ea580c" }}>BOT</span>
+          </div>
+          {/* Spinner */}
+          <div className="relative w-12 h-12">
+            <div className="absolute inset-0 rounded-full border-2 border-[#0284c7]/20" />
+            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[#0284c7] animate-spin" />
+            <div
+              className="absolute inset-[6px] rounded-full border-2 border-transparent border-t-[#ea580c] animate-spin"
+              style={{
+                animationDirection: "reverse",
+                animationDuration: "0.6s",
+              }}
+            />
+          </div>
+          {/* Status */}
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="text-[10px] tracking-[3px] text-white" style={MONO}>
+              AUTHENTICATING
+            </div>
+            <div
+              className="text-[8px] tracking-[2px]"
+              style={{ ...MONO, color: "#4a6080" }}
+            >
+              {liveUser
+                ? `WELCOME, ${liveUser.toUpperCase()}`
+                : "VERIFYING KITE SESSION…"}
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="w-48 h-[2px] bg-[#0f1923] overflow-hidden rounded-full">
+            <div
+              className="h-full bg-gradient-to-r from-[#0284c7] to-[#ea580c] rounded-full animate-[progress_2.2s_ease-in-out_forwards]"
+              style={{
+                width: "0%",
+                animation: "progress 2.2s ease-in-out forwards",
+              }}
+            />
+          </div>
+        </div>
+        <style>{`@keyframes progress { from { width:0% } to { width:100% } }`}</style>
+      </div>
+    );
+  }
+
   // ── Session Countdown Timer ───────────────────────────────────────────────────
   const [sessionTimer, setSessionTimer] = useState("");
   useEffect(() => {
@@ -1031,9 +1097,9 @@ function OptionsPageInner() {
   const [vixValue, setVixValue] = useState<number | null>(null);
   useEffect(() => {
     const fetchVix = () =>
-      fetch("/api/market/vix", { cache: "no-store" })
+      fetch("https://query1.finance.yahoo.com/v8/finance/chart/%5EINDIAVIX?interval=1d&range=1d", { cache: "no-store" })
         .then(r => r.json())
-        .then(d => { const v = d?.value; if (typeof v === "number") setVixValue(v); })
+        .then(d => { const v = d?.chart?.result?.[0]?.meta?.regularMarketPrice; if (v) setVixValue(v); })
         .catch(() => {});
     fetchVix();
     const vid = setInterval(fetchVix, 5 * 60 * 1000);
@@ -1095,72 +1161,6 @@ function OptionsPageInner() {
     }
     prevAlertCount.current = count;
   }, [smcAlerts.length, soundEnabled, notifEnabled, playBeep]);
-
-  if (!isDemoMode && hydrated && !authenticated) {
-    return null;
-  }
-
-  if (justLoggedIn) {
-    return (
-      <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center"
-        style={{ background: "#050a0f" }}
-      >
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(2,132,199,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(2,132,199,0.04) 1px, transparent 1px)",
-            backgroundSize: "48px 48px",
-          }}
-        />
-        <div className="relative flex flex-col items-center gap-6">
-          <div
-            className="text-[48px] leading-none tracking-[2px]"
-            style={BEBAS}
-          >
-            <span className="text-white">ALGO</span>
-            <span style={{ color: "#0284c7" }}>.</span>
-            <span style={{ color: "#ea580c" }}>BOT</span>
-          </div>
-          <div className="relative w-12 h-12">
-            <div className="absolute inset-0 rounded-full border-2 border-[#0284c7]/20" />
-            <div className="absolute inset-0 rounded-full border-2 border-transparent border-t-[#0284c7] animate-spin" />
-            <div
-              className="absolute inset-[6px] rounded-full border-2 border-transparent border-t-[#ea580c] animate-spin"
-              style={{
-                animationDirection: "reverse",
-                animationDuration: "0.6s",
-              }}
-            />
-          </div>
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="text-[10px] tracking-[3px] text-white" style={MONO}>
-              AUTHENTICATING
-            </div>
-            <div
-              className="text-[8px] tracking-[2px]"
-              style={{ ...MONO, color: "#4a6080" }}
-            >
-              {liveUser
-                ? `WELCOME, ${liveUser.toUpperCase()}`
-                : "VERIFYING KITE SESSION..."}
-            </div>
-          </div>
-          <div className="w-48 h-[2px] bg-[#0f1923] overflow-hidden rounded-full">
-            <div
-              className="h-full bg-gradient-to-r from-[#0284c7] to-[#ea580c] rounded-full animate-[progress_2.2s_ease-in-out_forwards]"
-              style={{
-                width: "0%",
-                animation: "progress 2.2s ease-in-out forwards",
-              }}
-            />
-          </div>
-        </div>
-        <style>{`@keyframes progress { from { width:0% } to { width:100% } }`}</style>
-      </div>
-    );
-  }
 
   // ── Avatar helper (used in header + drawer) ───────────────────────────────
   const profileInitials = kiteProfile

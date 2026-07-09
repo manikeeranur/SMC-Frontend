@@ -9,6 +9,16 @@ export const NUM_LOTS        = 10; // ← change this to match backend NUM_LOTS 
 export const SMC_MIN_PREMIUM = 200;
 export const SMC_MAX_PREMIUM = 300;
 
+// ─── VWAP 9:30 Strategy ─────────────────────────────────────────────────────────
+// Exact 09:30 IST entry only · CE/PE whose premium is ₹130–₹150 AND price is
+// touching/above its own VWAP · single entry per day · Target +30% / SL −8%
+export const VWAP930_MIN_PREMIUM = 130;
+export const VWAP930_MAX_PREMIUM = 150;
+export const VWAP930_SL_PCT      = 8;   // stop loss  −8%
+export const VWAP930_TARGET_PCT  = 30;  // target     +30%
+export const VWAP930_NUM_LOTS    = 10;  // 10 lots, single entry per day
+export const VWAP930_ENTRY_TIME  = "09:30";
+
 export const LOT_SIZES: Record<string, number> = {
   NIFTY:   LOT_SIZE,
   SENSEX:  SENSEX_LOT_SIZE,

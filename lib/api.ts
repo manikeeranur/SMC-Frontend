@@ -110,6 +110,24 @@ export const autoTradeApi = {
   clear: () => req("/api/auto-trade/positions", { method: "DELETE" }),
 };
 
+export const vwap930Api = {
+  status: () => req<any>("/api/vwap930/status"),
+  alerts: (expiry: string) => req<any>(`/api/vwap930/alerts?expiry=${expiry}`),
+  scan: (expiry: string) =>
+    req<any>(`/api/vwap930/scan?expiry=${expiry}`, { method: "POST" }),
+  clear: () => req("/api/vwap930/clear", { method: "DELETE" }),
+  historical: (date: string, expiry: string) =>
+    req<any>(`/api/vwap930/historical?date=${date}&expiry=${expiry}`),
+  loadBacktest: (date: string) => req<any>(`/api/vwap930/backtest-db?date=${date}`),
+};
+
+export const vwap930AutoTradeApi = {
+  status: () => req<any>("/api/vwap930-auto-trade/status"),
+  enable: () => req<any>("/api/vwap930-auto-trade/enable", { method: "POST" }),
+  disable: () => req<any>("/api/vwap930-auto-trade/disable", { method: "POST" }),
+  clear: () => req("/api/vwap930-auto-trade/positions", { method: "DELETE" }),
+};
+
 export const accountApi = {
   livePositions: () => req<{
     positions: Array<{

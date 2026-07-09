@@ -33,6 +33,8 @@ import {
   optionsApi,
   authApi,
   autoTradeApi,
+  vwap930Api,
+  vwap930AutoTradeApi,
   accountApi,
   watchlistApi,
   createWS,
@@ -40,7 +42,7 @@ import {
   AuthError,
 } from "@/lib/api";
 
-import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, MARKET_HOLIDAYS, MARKET_HOLIDAYS_MAP } from "@/lib/constants";
+import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, VWAP930_MIN_PREMIUM, VWAP930_MAX_PREMIUM, VWAP930_SL_PCT, VWAP930_TARGET_PCT, VWAP930_NUM_LOTS, VWAP930_ENTRY_TIME, MARKET_HOLIDAYS, MARKET_HOLIDAYS_MAP } from "@/lib/constants";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import {
   Select,
@@ -62,6 +64,7 @@ import {
   IconX,
   IconChartCandle,
   IconScan,
+  IconClock,
   IconBookmark,
   IconBookmarkFilled,
   IconLayoutGrid,
@@ -120,7 +123,7 @@ function OptionsPageInner() {
   const [live, setLive] = useState(true);
 
   const [activeTab, setActiveTab] = useState<
-    "chain" | "smc" | "watchlist" | "ohlc" | "results" | "account" | "journal"
+    "chain" | "smc" | "vwap930" | "watchlist" | "ohlc" | "results" | "account" | "journal"
   >("chain");
   type WlistGroup = { id: string; name: string; items: WatchedOption[] };
   const [wlistGroups, setWlistGroups] = useState<WlistGroup[]>([{ id: "wl_default", name: "My Watchlist", items: [] }]);
@@ -154,6 +157,28 @@ function OptionsPageInner() {
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [autoTradeEnabled, setAutoTradeEnabled] = useState(false);
   const [autoPositions, setAutoPositions] = useState<any[]>([]);
+  // ── VWAP 9:30 strategy state (independent from SMC) ─────────────────────────
+  const [vwapAlerts, setVwapAlerts] = useState<any[]>([]);
+  const [vwapWinRate, setVwapWinRate] = useState<number | null>(null);
+  const [vwapStatus, setVwapStatus] = useState<{
+    scanActive: boolean;
+    tradedToday: boolean;
+    lastScanAt: string | null;
+    wins: number;
+    losses: number;
+  } | null>(null);
+  const [vwapBusy, setVwapBusy] = useState(false);
+  const [vwapHistDate, setVwapHistDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  });
+  const [vwapHistBusy, setVwapHistBusy] = useState(false);
+  const [vwapHistErr, setVwapHistErr] = useState("");
+  const [vwapHistResults, setVwapHistResults] = useState<any[] | null>(null);
+  const [vwapAutoTradeEnabled, setVwapAutoTradeEnabled] = useState(false);
+  const [vwapAutoPositions, setVwapAutoPositions] = useState<any[]>([]);
+  const knownVwapAlertIds = useRef<Set<string>>(new Set());
   const [candles3m, setCandles3m] = useState<Record<number, any[]>>({});
   const [alertPopup, setAlertPopup] = useState<any | null>(null);
   const alertPopupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -262,6 +287,7 @@ function OptionsPageInner() {
     const savedTab = localStorage.getItem("kite_tab") as
       | "chain"
       | "smc"
+      | "vwap930"
       | "watchlist"
       | "ohlc"
       | "results"
@@ -801,6 +827,123 @@ function OptionsPageInner() {
         ? await autoTradeApi.disable()
         : await autoTradeApi.enable();
       setAutoTradeEnabled(r.enabled);
+    } catch {}
+  }
+
+  // ── VWAP 9:30 alerts fetch + manual trigger ─────────────────────────────────
+  async function fetchVwapAlerts() {
+    const e = niftyExpiry || expiry;
+    if (!e || isDemoMode || !authenticated) return;
+    try {
+      const r = (await vwap930Api.alerts(e)) as any;
+      const alertsList = r.alerts ?? [];
+
+      const newActive = alertsList.filter((a: any) =>
+        a.status === "ACTIVE" && !knownVwapAlertIds.current.has(a.id)
+      );
+      if (newActive.length > 0 && knownVwapAlertIds.current.size > 0) {
+        fireAlertNotifications(newActive);
+      }
+      alertsList.forEach((a: any) => knownVwapAlertIds.current.add(a.id));
+
+      setVwapAlerts(alertsList);
+      setVwapWinRate(r.winRate ?? null);
+    } catch {}
+  }
+
+  async function triggerVwapScan() {
+    const e = niftyExpiry || expiry;
+    if (!e || isDemoMode || !authenticated) return;
+    setVwapBusy(true);
+    try {
+      await vwap930Api.scan(e);
+      setTimeout(fetchVwapAlerts, 2000);
+    } catch {
+    } finally {
+      setVwapBusy(false);
+    }
+  }
+
+  // Auto-load VWAP930 backtest from MongoDB when date changes
+  useEffect(() => {
+    if (!authenticated || isDemoMode) return;
+    vwap930Api
+      .loadBacktest(vwapHistDate)
+      .then((data: any) => {
+        if (data.results?.length) {
+          setVwapHistResults(data.results);
+          if (data.winRate != null) setVwapWinRate(data.winRate);
+        } else {
+          setVwapHistResults(null);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vwapHistDate, authenticated]);
+
+  async function runHistoricalVwap() {
+    const e = niftyExpiry || expiry;
+    if (!e || isDemoMode || !authenticated) return;
+    setVwapHistBusy(true);
+    setVwapHistErr("");
+    setVwapHistResults(null);
+    try {
+      const r = (await vwap930Api.historical(vwapHistDate, e)) as any;
+      const results = r.results ?? [];
+      setVwapHistResults(results);
+      if (r.winRate !== null && r.winRate !== undefined)
+        setVwapWinRate(r.winRate);
+    } catch (e: any) {
+      setVwapHistErr(e.message || "Failed to fetch historical scan");
+    } finally {
+      setVwapHistBusy(false);
+    }
+  }
+
+  // Auto-refresh VWAP930 alerts every second when on VWAP930 tab
+  useEffect(() => {
+    if (activeTab !== "vwap930" || !authenticated || isDemoMode) return;
+    fetchVwapAlerts();
+    const t = setInterval(fetchVwapAlerts, 1000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, niftyExpiry, expiry, authenticated]);
+
+  // Fetch VWAP930 status every 30s
+  useEffect(() => {
+    if (isDemoMode || !authenticated) return;
+    const tick = () =>
+      vwap930Api
+        .status()
+        .then((s: any) => setVwapStatus(s))
+        .catch(() => {});
+    tick();
+    const t = setInterval(tick, 30_000);
+    return () => clearInterval(t);
+  }, [authenticated]);
+
+  // Poll VWAP930 auto-trade status every 10s when on that tab
+  useEffect(() => {
+    if (isDemoMode || !authenticated || activeTab !== "vwap930") return;
+    const tick = () =>
+      vwap930AutoTradeApi
+        .status()
+        .then((s: any) => {
+          setVwapAutoTradeEnabled(s.enabled);
+          setVwapAutoPositions(s.positions ?? []);
+        })
+        .catch(() => {});
+    tick();
+    const t = setInterval(tick, 10_000);
+    return () => clearInterval(t);
+  }, [authenticated, activeTab]);
+
+  async function toggleVwapAutoTrade() {
+    try {
+      const r = vwapAutoTradeEnabled
+        ? await vwap930AutoTradeApi.disable()
+        : await vwap930AutoTradeApi.enable();
+      setVwapAutoTradeEnabled(r.enabled);
     } catch {}
   }
 
@@ -1417,6 +1560,12 @@ function OptionsPageInner() {
                 badge: smcAlerts.length || undefined,
               },
               {
+                tab: "vwap930",
+                icon: <IconClock size={20} />,
+                label: "VWAP 9:30",
+                badge: vwapAlerts.length || undefined,
+              },
+              {
                 tab: "watchlist",
                 icon: <IconBookmark size={20} />,
                 label: "Watch",
@@ -1460,6 +1609,9 @@ function OptionsPageInner() {
               )}
               {smcStatus?.scanActive && tab === "smc" && (
                 <span className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-[#7c3aed] live-pulse" />
+              )}
+              {vwapStatus?.scanActive && tab === "vwap930" && (
+                <span className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full bg-[#0d9488] live-pulse" />
               )}
             </button>
           ))}
@@ -2191,6 +2343,42 @@ function OptionsPageInner() {
             />
           )}
 
+          {/* ── VWAP 9:30 ALERTS ── */}
+          {activeTab === "vwap930" && (
+            <VWAP930TableView
+              alerts={vwapAlerts}
+              winRate={vwapWinRate}
+              vStatus={vwapStatus}
+              busy={vwapBusy}
+              authenticated={authenticated}
+              expiry={niftyExpiry || expiry}
+              onTrigger={triggerVwapScan}
+              onClear={async () => {
+                await vwap930Api.clear();
+                setVwapAlerts([]);
+                setVwapWinRate(null);
+              }}
+              onAddWatch={addToWatch}
+              histDate={vwapHistDate}
+              onHistDateChange={setVwapHistDate}
+              histBusy={vwapHistBusy}
+              histErr={vwapHistErr}
+              histResults={vwapHistResults}
+              onHistScan={runHistoricalVwap}
+              onHistClear={() => {
+                setVwapHistResults(null);
+                setVwapHistErr("");
+              }}
+              autoTradeEnabled={vwapAutoTradeEnabled}
+              autoPositions={vwapAutoPositions}
+              onToggleAutoTrade={toggleVwapAutoTrade}
+              onOpenChart={(token, strike, type, tradingsymbol) =>
+                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", tradingsymbol, index: "NIFTY" })
+              }
+              chainRows={data?.rows ?? []}
+            />
+          )}
+
           {/* ── WATCHLIST ── */}
           {activeTab === "watchlist" && (() => {
             const activeGroup = wlistGroups.find(g => g.id === activeWlId);
@@ -2477,6 +2665,24 @@ function OptionsPageInner() {
               style={{ background: "#ea580c" }}
             >
               {smcAlerts.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => { setActiveTab("vwap930"); setChartTarget(null); }}
+          className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "vwap930" ? "#ea580c" : "#94a3b8" }}
+        >
+          <IconClock size={22} />
+          <span className="text-[8px]" style={MONO}>
+            9:30
+          </span>
+          {vwapAlerts.length > 0 && (
+            <span
+              className="absolute top-1.5 right-[calc(50%-18px)] min-w-[14px] h-[14px] px-0.5 flex items-center justify-center rounded-full text-[8px] font-bold text-white"
+              style={{ background: "#ea580c" }}
+            >
+              {vwapAlerts.length}
             </span>
           )}
         </button>
@@ -6208,6 +6414,740 @@ function SMCTableView({
                     {sub}
                   </div>
                 )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── VWAP 9:30 TABLE VIEW ──────────────────────────────────────────────────────
+// Same mode-switcher / auto-trade / scan / backtest UX as SMC, adapted for a
+// strategy that takes at most ONE entry per day, at exactly 09:30 IST, with a
+// single SL(-8%)/Target(+30%) leg instead of SMC's two-tier target system.
+function VWAP930TableView({
+  alerts,
+  winRate,
+  vStatus,
+  busy,
+  authenticated,
+  expiry,
+  onTrigger,
+  onClear,
+  onAddWatch,
+  histDate,
+  onHistDateChange,
+  histBusy,
+  histErr,
+  histResults,
+  onHistScan,
+  onHistClear,
+  autoTradeEnabled,
+  autoPositions,
+  onToggleAutoTrade,
+  onOpenChart,
+  chainRows,
+}: {
+  alerts: any[];
+  winRate: number | null;
+  vStatus: {
+    scanActive: boolean;
+    tradedToday: boolean;
+    lastScanAt: string | null;
+    wins: number;
+    losses: number;
+  } | null;
+  busy: boolean;
+  authenticated: boolean;
+  expiry: string;
+  onTrigger: () => void;
+  onClear: () => void;
+  onAddWatch: (leg: OptionLeg) => void;
+  histDate: string;
+  onHistDateChange: (d: string) => void;
+  histBusy: boolean;
+  histErr: string;
+  histResults: any[] | null;
+  onHistScan: () => void;
+  onHistClear: () => void;
+  autoTradeEnabled: boolean;
+  autoPositions: any[];
+  onToggleAutoTrade: () => void;
+  onOpenChart: (token: number, strike: number, type: "CE" | "PE", tradingsymbol?: string) => void;
+  chainRows: any[];
+}) {
+  const [mode, setMode] = useState<"live" | "backtest">("live");
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+
+  const resolveToken = (strike: number, direction: string): number | undefined => {
+    const row = chainRows.find((r: any) => r.strike === strike);
+    return direction === "CE" ? row?.ce?.token : row?.pe?.token;
+  };
+
+  const tableAlerts =
+    mode === "backtest" && histResults !== null ? histResults : alerts;
+
+  const wins    = tableAlerts.filter((a) => a.status === "TARGET").length;
+  const losses  = tableAlerts.filter((a) => a.status === "SL").length;
+  const eod     = tableAlerts.filter((a) => a.status === "EOD").length;
+  const active  = tableAlerts.filter((a) => a.status === "ACTIVE").length;
+  const total   = wins + losses;
+  const wr      = total > 0 ? ((wins / total) * 100).toFixed(1) : null;
+
+  const LOT_QTY = LOT_SIZE * VWAP930_NUM_LOTS;
+  const V_COLS = "80px 1fr 90px 90px 80px 80px 110px 150px 90px 80px 130px 80px";
+
+  const fmtLotPnl = (n: number) => {
+    const abs = Math.abs(n);
+    const s = n >= 0 ? "+" : "−";
+    return abs >= 100000
+      ? `${s}₹${(abs / 100000).toFixed(2)}L`
+      : abs >= 1000
+        ? `${s}₹${(abs / 1000).toFixed(1)}K`
+        : `${s}₹${abs.toFixed(0)}`;
+  };
+  const fmtFull = (n: number) => {
+    const [int, dec] = Math.abs(n).toFixed(2).split(".");
+    return `${int.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${dec}`;
+  };
+
+  const calcCharges = (entryPrice: number, exitPrice: number, qty: number): number => {
+    const turnover  = (entryPrice + exitPrice) * qty;
+    const brokerage = 40;
+    const stt       = exitPrice * qty * 0.000625;
+    const exchange  = turnover * 0.00053;
+    const clearing  = turnover * 0.00003;
+    const gst       = (brokerage + exchange + clearing) * 0.18;
+    const sebi      = turnover * 0.000001;
+    const stamp     = entryPrice * qty * 0.00003;
+    return brokerage + stt + exchange + clearing + gst + sebi + stamp;
+  };
+
+  const totalLotPnl = tableAlerts.reduce(
+    (s, a) => s + (a.currentPnL ?? 0) * LOT_QTY,
+    0,
+  );
+  const realizedLotPnl = tableAlerts
+    .filter((a) => a.status !== "ACTIVE")
+    .reduce((s, a) => s + (a.currentPnL ?? 0) * LOT_QTY, 0);
+
+  const statusMeta = (status: string, pnl: number) => {
+    if (status === "TARGET") return { icon: "🎯", label: "TARGET", color: "#16a34a" };
+    if (status === "SL")     return { icon: "🛑", label: "SL",     color: "#e11d48" };
+    if (status === "EOD")    return { icon: "🕐", label: "EOD",    color: "#b45309" };
+    if (status === "TIME_EXIT")
+      return { icon: "⏱", label: "15:20 EXIT", color: pnl >= 0 ? "#16a34a" : "#e11d48" };
+    return { icon: "⏳", label: "ACTIVE", color: "#0284c7" };
+  };
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+      {/* ── Mode switcher + action bar ── */}
+      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-2.5 bg-white border-b border-[#cbd5e1] flex-shrink-0 overflow-x-auto">
+        <div className="flex border border-[#cbd5e1] rounded-sm overflow-hidden flex-shrink-0">
+          {(["live", "backtest"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`px-2 sm:px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors whitespace-nowrap ${mode === m ? "text-white" : "text-[#64748b] hover:bg-[#f1f5f9]"}`}
+              style={{
+                ...MONO,
+                background:
+                  mode === m
+                    ? m === "live"
+                      ? "#0d9488"
+                      : "#ea580c"
+                    : "transparent",
+              }}
+            >
+              {m === "live" ? "▶ LIVE" : "◉ TEST"}
+            </button>
+          ))}
+        </div>
+
+        {mode === "live" ? (
+          <>
+            <div
+              className="flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
+              style={{
+                background: vStatus?.scanActive ? "rgba(13,148,136,0.05)" : "#f1f5f9",
+                borderColor: vStatus?.scanActive ? "rgba(13,148,136,0.4)" : "#cbd5e1",
+              }}
+            >
+              <span
+                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${vStatus?.scanActive ? "bg-[#0d9488] live-pulse" : "bg-[#94a3b8]"}`}
+              />
+              <span
+                className="hidden sm:block text-[9px] font-bold whitespace-nowrap"
+                style={{ ...MONO, color: vStatus?.scanActive ? "#0d9488" : "#64748b" }}
+              >
+                {vStatus?.scanActive
+                  ? "AT 09:30"
+                  : vStatus?.tradedToday
+                    ? "TRADED TODAY"
+                    : authenticated
+                      ? "WAITING"
+                      : "NOT AUTH"}
+              </span>
+            </div>
+            {wr !== null && (
+              <div
+                className="hidden md:flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
+                style={{
+                  background: Number(wr) >= 70 ? (isDark ? "#052e16" : "#f0fdf4") : (isDark ? "#2d0505" : "#fef2f2"),
+                  borderColor: Number(wr) >= 70 ? (isDark ? "#166534" : "#bbf7d0") : (isDark ? "#991b1b" : "#fecaca"),
+                }}
+              >
+                <span
+                  className="text-[9px] font-bold whitespace-nowrap"
+                  style={{ ...MONO, color: Number(wr) >= 70 ? "#16a34a" : "#e11d48" }}
+                >
+                  {wr}% · {wins}W/{losses}L
+                </span>
+              </div>
+            )}
+            <div className="hidden sm:block text-[9px] text-[#64748b] whitespace-nowrap flex-shrink-0" style={MONO}>
+              <span className="text-[#0284c7] font-bold">{active}</span> active
+              · {alerts.length} total
+            </div>
+            <div className="ml-auto flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              {authenticated && !isDemoMode && (
+                <button
+                  onClick={onToggleAutoTrade}
+                  className="px-2 sm:px-3 py-1.5 text-[9px] font-bold rounded-sm border cursor-pointer transition-all whitespace-nowrap"
+                  style={{
+                    ...MONO,
+                    background: autoTradeEnabled ? "#16a34a" : (isDark ? "#0a0f16" : "#f8fafc"),
+                    borderColor: autoTradeEnabled ? "#16a34a" : "#e11d48",
+                    color: autoTradeEnabled ? "#fff" : "#e11d48",
+                  }}
+                >
+                  {autoTradeEnabled ? "⏹ STOP" : "▶ AUTO"}
+                </button>
+              )}
+              <button
+                onClick={onTrigger}
+                disabled={busy || !authenticated || isDemoMode}
+                className="px-2 sm:px-3 py-1.5 text-[9px] font-bold rounded-sm border cursor-pointer disabled:opacity-40 whitespace-nowrap"
+                style={{ ...MONO, background: "#0d948818", borderColor: "#0d9488", color: "#0d9488" }}
+              >
+                {busy ? "…" : "▶ SCAN"}
+              </button>
+              {alerts.length > 0 && (
+                <button
+                  onClick={onClear}
+                  className="px-2 sm:px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8] whitespace-nowrap"
+                  style={MONO}
+                >
+                  CLR
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+              <span className="hidden sm:block text-[9px] text-[#64748b] tracking-[1px]" style={MONO}>
+                DATE
+              </span>
+              <input
+                type="date"
+                value={histDate}
+                max={(() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 1);
+                  return d.toISOString().split("T")[0];
+                })()}
+                onChange={(e) => onHistDateChange(e.target.value)}
+                className="border border-[#cbd5e1] rounded-sm px-2 py-1 text-[10px] sm:text-[11px] bg-white cursor-pointer outline-none"
+                style={MONO}
+              />
+              <button
+                onClick={onHistScan}
+                disabled={histBusy || !authenticated || isDemoMode || !expiry}
+                className="px-2 sm:px-3 py-1.5 text-[9px] font-bold rounded-sm border cursor-pointer disabled:opacity-40 transition-colors whitespace-nowrap"
+                style={{ ...MONO, background: "#ea580c18", borderColor: "#ea580c", color: "#ea580c" }}
+              >
+                {histBusy ? "…" : "◉ RUN"}
+              </button>
+              {histErr && (
+                <span className="text-[9px] text-[#e11d48] whitespace-nowrap" style={MONO}>
+                  {histErr}
+                </span>
+              )}
+            </div>
+            {histResults !== null && wr !== null && (
+              <div
+                className="hidden md:flex items-center gap-1.5 px-2 py-1 border rounded-sm flex-shrink-0"
+                style={{
+                  background: Number(wr) >= 70 ? (isDark ? "#052e16" : "#f0fdf4") : (isDark ? "#2d0505" : "#fef2f2"),
+                  borderColor: Number(wr) >= 70 ? (isDark ? "#166534" : "#bbf7d0") : (isDark ? "#991b1b" : "#fecaca"),
+                }}
+              >
+                <span
+                  className="text-[9px] font-bold whitespace-nowrap"
+                  style={{ ...MONO, color: Number(wr) >= 70 ? "#16a34a" : "#e11d48" }}
+                >
+                  {wr}% · {wins}W/{losses}L{eod > 0 ? ` · ${eod}E` : ""}
+                </span>
+              </div>
+            )}
+            <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+              {histResults !== null && (
+                <button
+                  onClick={onHistClear}
+                  className="px-2 sm:px-3 py-1.5 text-[9px] text-[#94a3b8] border border-[#cbd5e1] rounded-sm cursor-pointer hover:border-[#94a3b8] whitespace-nowrap"
+                  style={MONO}
+                >
+                  CLR
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Auto Trade Positions Panel ── */}
+      {autoPositions.length > 0 && (
+        <div className="flex-shrink-0 px-5 py-2 bg-[#f0fdf4] border-b border-[#bbf7d0]">
+          <div className="text-[8px] font-bold tracking-[1.5px] text-[#16a34a] mb-1.5" style={MONO}>
+            AUTO TRADE POSITIONS ({autoPositions.length})
+          </div>
+          <div className="flex flex-col gap-1">
+            {autoPositions.map((p: any, i: number) => (
+              <div key={i} className="flex items-center gap-3 text-[9px]" style={MONO}>
+                <span className="font-bold text-[#1e293b]">{p.tradingsymbol}</span>
+                <span
+                  className="px-1.5 py-0.5 rounded-sm text-[8px] font-bold"
+                  style={{
+                    background:
+                      p.status?.startsWith("EXITED") || p.status === "ACTIVE"
+                        ? "#16a34a22"
+                        : p.status === "ERROR" ? "#ef444422" : "#f59e0b22",
+                    color:
+                      p.status?.startsWith("EXITED") || p.status === "ACTIVE"
+                        ? "#16a34a"
+                        : p.status === "ERROR" ? "#ef4444" : "#b45309",
+                  }}
+                >
+                  {p.status}
+                </span>
+                {p.entryOrderId && <span className="text-[#64748b]">Entry: {p.entryOrderId}</span>}
+                {p.slOrderId && <span className="text-[#ef4444]">SL: {p.slOrderId}</span>}
+                {p.logs?.[p.logs.length - 1] && (
+                  <span className="text-[#94a3b8] truncate max-w-[300px]">{p.logs[p.logs.length - 1]}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── Strategy info bar ── */}
+      <div className="hidden md:flex items-center gap-2 px-5 py-1.5 bg-[#fafbfc] border-b border-[#e2e8f0] flex-shrink-0 flex-wrap">
+        <span className="text-[7px] text-[#94a3b8] tracking-[1px]" style={MONO}>
+          VWAP 9:30:
+        </span>
+        <span className="text-[7px] text-[#94a3b8]" style={MONO}>
+          NIFTY premium ₹{VWAP930_MIN_PREMIUM}–₹{VWAP930_MAX_PREMIUM} · CE/PE touching/above own VWAP ·
+          SL −{VWAP930_SL_PCT}% · Target +{VWAP930_TARGET_PCT}% · entry only at {VWAP930_ENTRY_TIME} ·
+          1 trade/day · {VWAP930_NUM_LOTS} lots
+        </span>
+      </div>
+
+      {/* ── Empty state ── */}
+      {tableAlerts.length === 0 && (
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 px-4">
+          <IconScan size={48} className="text-[#e2e8f0]" />
+          <p className="text-[11px] text-[#94a3b8] text-center" style={MONO}>
+            {mode === "backtest"
+              ? "Select a date and tap RUN to check that day's 09:30 signal"
+              : !authenticated
+                ? "Connect Kite to start VWAP 9:30 scanning"
+                : isDemoMode
+                  ? "VWAP 9:30 scanner requires live data"
+                  : vStatus?.tradedToday
+                    ? "Already traded today · one entry per day"
+                    : "No alert yet · scanner fires once, exactly at 09:30 AM"}
+          </p>
+          {mode === "live" && authenticated && !isDemoMode && (
+            <button
+              onClick={onTrigger}
+              disabled={busy}
+              className="px-5 py-2.5 text-[10px] font-bold tracking-[2px] rounded-sm border cursor-pointer disabled:opacity-40"
+              style={{ ...MONO, background: "#0d948818", borderColor: "#0d9488", color: "#0d9488" }}
+            >
+              {busy ? "SCANNING…" : "▶ RUN VWAP 9:30 SCAN NOW"}
+            </button>
+          )}
+          {mode === "backtest" && authenticated && !isDemoMode && (
+            <button
+              onClick={onHistScan}
+              disabled={histBusy}
+              className="px-5 py-2.5 text-[10px] font-bold tracking-[2px] rounded-sm border cursor-pointer disabled:opacity-40"
+              style={{ ...MONO, background: "#ea580c18", borderColor: "#ea580c", color: "#ea580c" }}
+            >
+              {histBusy ? "SCANNING…" : "◉ RUN BACKTEST NOW"}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Table ── */}
+      {tableAlerts.length > 0 && (
+        <>
+          {/* ── MOBILE CARDS ── */}
+          <div className="md:hidden flex-1 overflow-auto px-3 py-3 space-y-3">
+            {tableAlerts.map((a, idx) => {
+              const isCE   = a.direction === "CE";
+              const dirClr = isCE ? "#0284c7" : "#e11d48";
+              const sm     = statusMeta(a.status, a.currentPnL ?? 0);
+              const pnlUp  = (a.currentPnL ?? 0) >= 0;
+              const pnlClr = pnlUp ? "#16a34a" : "#e11d48";
+              const sl     = a.rr?.sl ?? 0;
+              const target = a.rr?.target ?? 0;
+              const ltp    = a.leg?.ltp ?? a.lastLtp ?? a.rr?.entry ?? 0;
+              const fill   = target - sl > 0 ? Math.min(Math.max(((ltp - sl) / (target - sl)) * 100, 0), 100) : 50;
+              return (
+                <div
+                  key={a.id ?? idx}
+                  className="rounded-xl overflow-hidden"
+                  style={{
+                    background: isDark ? "#0d1420" : "#fff",
+                    border: `1px solid ${a.status === "TARGET" ? "#22c55e33" : a.status === "SL" ? "#ef444433" : isDark ? "#1e2a3a" : "#e2e8f0"}`,
+                    borderLeft: `3px solid ${sm.color}`,
+                  }}
+                >
+                  <div className="px-3 py-3 flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                      <div
+                        className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0"
+                        style={{ background: `${dirClr}18`, border: `1.5px solid ${dirClr}40` }}
+                      >
+                        <span className="text-[7px] font-bold" style={{ ...MONO, color: "#64748b" }}>NI</span>
+                        <span className="text-[12px] font-bold" style={{ ...BEBAS, color: dirClr }}>{a.direction}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[15px] font-bold leading-tight" style={{ ...BEBAS, color: isDark ? "#e2e8f0" : "#1e293b" }}>
+                          NIFTY {a.strike} {a.direction === "CE" ? "Call" : "Put"}
+                        </div>
+                        <div className="text-[8px] mt-0.5" style={{ ...MONO, color: "#64748b" }}>
+                          {fmtTime(a.entryTime)}{a.exitTime ? ` → ${fmtTime(a.exitTime)}` : " → ACTIVE"}
+                          {a.spot ? `  ·  spot ${a.spot.toFixed(0)}` : ""}
+                        </div>
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          <span
+                            className="text-[8px] font-bold px-1.5 py-0.5 rounded-sm"
+                            style={{ ...MONO, background: `${dirClr}18`, color: dirClr, border: `1px solid ${dirClr}30` }}
+                          >
+                            VWAP ₹{a.vwap?.toFixed?.(2) ?? a.vwap ?? "—"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                      <span
+                        className="text-[8px] font-bold px-2 py-0.5 rounded-full"
+                        style={{ ...MONO, background: `${sm.color}18`, color: sm.color, border: `1px solid ${sm.color}40` }}
+                      >
+                        {sm.icon} {sm.label}
+                      </span>
+                      {a.strike && a.direction && (
+                        <button
+                          onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE", a.leg?.tradingsymbol); }}
+                          className="w-5 h-5 flex items-center justify-center cursor-pointer"
+                          style={{ color: dirClr, opacity: 0.7 }}
+                          title="Open chart"
+                        >
+                          <CandleIcon color={dirClr} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {a.status === "ACTIVE" && (
+                    <div className="px-3 pb-2">
+                      <div className="h-1.5 bg-[#e2e8f0] rounded-full overflow-hidden w-full">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${fill}%`, background: fill >= 67 ? "#16a34a" : fill >= 33 ? "#f59e0b" : "#e11d48" }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div
+                    className="px-3 py-1.5 flex items-center gap-3 border-t"
+                    style={{ background: isDark ? "#0d1420" : "#fff", borderColor: isDark ? "#1e2a3a" : "#e2e8f0" }}
+                  >
+                    <span className="text-[9px] font-bold" style={{ ...MONO, color: "#e11d48" }}>
+                      SL ₹{a.rr?.sl?.toFixed(2) ?? "—"}
+                    </span>
+                    <span className="text-[9px] font-bold" style={{ ...MONO, color: "#16a34a" }}>
+                      TGT ₹{a.rr?.target?.toFixed(2) ?? "—"}
+                    </span>
+                    <span className="text-[9px] font-bold ml-auto" style={{ ...MONO, color: pnlClr }}>
+                      {pnlUp ? "+" : "−"}₹{fmtFull((a.currentPnL ?? 0) * LOT_QTY)}
+                    </span>
+                  </div>
+                  {a.leg && a.status === "ACTIVE" && (
+                    <div className="px-3 pb-2.5 flex justify-end">
+                      <button
+                        onClick={() => onAddWatch(a.leg)}
+                        title="Add to watchlist"
+                        className="w-6 h-6 flex items-center justify-center rounded text-[11px] font-bold border cursor-pointer transition-all"
+                        style={{ background: `${dirClr}15`, borderColor: `${dirClr}50`, color: dirClr }}
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* ── DESKTOP TABLE ── */}
+          <div className="hidden md:flex flex-1 overflow-auto">
+            <div style={{ minWidth: "1080px", width: "100%" }}>
+              <div
+                className="grid sticky top-0 z-10 bg-[#f8fafc] border-b-2 border-[#cbd5e1] px-5"
+                style={{ gridTemplateColumns: V_COLS }}
+              >
+                {[
+                  "TIME",
+                  "STRIKE",
+                  "ENTRY",
+                  "CMP",
+                  "SL",
+                  "TARGET",
+                  "STATUS",
+                  `P&L · LOT (${VWAP930_NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
+                  "CHARGES",
+                  "MAX PTS",
+                  "MAX PROFITS",
+                  "",
+                ].map((h) => (
+                  <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] text-[#64748b] uppercase" style={MONO}>{h}</div>
+                ))}
+              </div>
+              {tableAlerts.map((a, idx) => {
+                const isCE   = a.direction === "CE";
+                const dirClr = isCE ? "#0284c7" : "#e11d48";
+                const sm     = statusMeta(a.status, a.currentPnL ?? 0);
+                const pnlUp  = (a.currentPnL ?? 0) >= 0;
+                const pnlClr = pnlUp ? "#16a34a" : "#e11d48";
+                const ltp    = a.lastLtp ?? a.leg?.ltp ?? a.rr?.entry ?? 0;
+                const sl     = a.rr?.sl ?? 0;
+                const target = a.rr?.target ?? 0;
+                const fillPct = target - sl > 0
+                  ? Math.min(Math.max(((ltp - sl) / (target - sl)) * 100, 0), 100)
+                  : 50;
+                const rowBg = a.status === "TARGET"
+                  ? (isDark ? "#052e16" : "#f0fdf4")
+                  : a.status === "SL"
+                    ? (isDark ? "#2d0505" : "#fff5f5")
+                    : a.status === "EOD"
+                      ? (isDark ? "#1c1500" : "#fefce8")
+                      : idx % 2 === 0
+                        ? (isDark ? "#0a0f16" : "#fff")
+                        : (isDark ? "#0d1420" : "#fafafa");
+                return (
+                  <div
+                    key={a.id ?? idx}
+                    className="grid px-5 items-center border-b border-[#f1f5f9] hover:bg-[#f0f4ff] transition-colors"
+                    style={{ gridTemplateColumns: V_COLS, background: rowBg }}
+                  >
+                    {/* TIME */}
+                    <div className="px-2 py-2.5">
+                      <div className="text-[10px] font-bold text-[#1e293b]" style={MONO}>{fmtTime(a.entryTime)}</div>
+                      {a.exitTime ? (
+                        <div className="text-[8px] text-[#94a3b8]" style={MONO}>→{fmtTime(a.exitTime)}</div>
+                      ) : (
+                        <div className="text-[8px] text-[#94a3b8]" style={MONO}>VWAP ₹{a.vwap?.toFixed?.(2) ?? a.vwap ?? "—"}</div>
+                      )}
+                    </div>
+
+                    {/* STRIKE */}
+                    <div className="px-2 py-2.5">
+                      <div className="text-[10px] font-bold leading-tight whitespace-nowrap" style={{ ...MONO, color: dirClr }}>
+                        NIFTY {fmtExpiry(a.expiry)} {a.strike} {a.direction}
+                      </div>
+                      <div className="text-[8px] text-[#94a3b8]" style={MONO}>spot {a.spot?.toFixed?.(0) ?? "—"}</div>
+                    </div>
+
+                    {/* ENTRY */}
+                    <div className="px-2 py-2.5 text-[12px] font-bold tabular-nums" style={{ ...MONO, color: dirClr }}>
+                      ₹{a.rr?.entry?.toFixed(2) ?? "—"}
+                    </div>
+
+                    {/* CMP */}
+                    <div className="px-2 py-2.5">
+                      <div className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: a.status === "ACTIVE" ? (ltp >= (a.rr?.entry ?? 0) ? "#16a34a" : "#e11d48") : "#64748b" }}>
+                        ₹{ltp?.toFixed?.(2) ?? "—"}
+                      </div>
+                      {a.status === "ACTIVE" && a.lastLtp != null && (
+                        <div className="text-[8px]" style={{ ...MONO, color: a.lastLtp >= (a.rr?.entry ?? 0) ? "#16a34a" : "#e11d48" }}>
+                          {a.lastLtp >= (a.rr?.entry ?? 0) ? "+" : ""}{(a.lastLtp - (a.rr?.entry ?? 0)).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* SL */}
+                    <div className="px-2 py-2.5 text-[11px] font-bold tabular-nums text-[#e11d48]" style={MONO}>
+                      ₹{a.rr?.sl?.toFixed(2) ?? "—"}
+                    </div>
+
+                    {/* TARGET */}
+                    <div className="px-2 py-2.5 text-[11px] font-bold tabular-nums text-[#16a34a]" style={MONO}>
+                      ₹{a.rr?.target?.toFixed(2) ?? "—"}
+                    </div>
+
+                    {/* STATUS + progress bar */}
+                    <div className="px-2 py-2.5">
+                      <div className="flex items-center gap-1 mb-0.5">
+                        <span className="text-[9px]">{sm.icon}</span>
+                        <span className="text-[8px] font-bold" style={{ ...MONO, color: sm.color }}>{sm.label}</span>
+                      </div>
+                      {a.status === "ACTIVE" ? (
+                        <div className="h-1.5 bg-[#e2e8f0] rounded-full overflow-hidden w-full">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{ width: `${fillPct}%`, background: fillPct >= 67 ? "#16a34a" : fillPct >= 33 ? "#f59e0b" : "#e11d48" }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="text-[8px] font-bold" style={{ ...MONO, color: sm.color }}>
+                          {fmtLotPnl((a.currentPnL ?? 0) * LOT_QTY)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* P&L — full amount */}
+                    <div className="px-2 py-2.5">
+                      <div className="text-[12px] font-bold tabular-nums leading-tight" style={{ ...MONO, color: pnlClr }}>
+                        {pnlUp ? "+" : "−"}₹{fmtFull((a.currentPnL ?? 0) * LOT_QTY)}
+                      </div>
+                      <div className="text-[8px] font-bold tabular-nums mt-0.5" style={{ ...MONO, color: pnlClr }}>
+                        ₹{Math.abs(a.currentPnL ?? 0).toFixed(2)} × {LOT_QTY}
+                      </div>
+                      <div className="text-[8px]" style={{ ...MONO, color: pnlClr }}>
+                        {pnlUp ? "+" : ""}{a.pnlPct?.toFixed(2) ?? "0.00"}%
+                      </div>
+                      {a.status !== "ACTIVE" && (a.currentPnL ?? 0) !== 0 && (
+                        <div className="text-[8px] tabular-nums mt-0.5" style={{ ...MONO, color: "#64748b" }}>
+                          exit ₹{((a.rr?.entry ?? 0) + (a.currentPnL ?? 0)).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* CHARGES */}
+                    <div className="px-2 py-2.5">
+                      {(() => {
+                        const entry   = a.rr?.entry ?? 0;
+                        const exitP   = a.status === "ACTIVE" ? (a.lastLtp ?? entry) : entry + (a.currentPnL ?? 0);
+                        const charges = calcCharges(entry, exitP, LOT_QTY);
+                        const isEst   = a.status === "ACTIVE";
+                        return (
+                          <>
+                            <div className="text-[11px] font-bold tabular-nums" style={{ ...MONO, color: "#b45309" }}>−₹{fmtFull(charges)}</div>
+                            <div className="text-[7px] mt-0.5" style={{ ...MONO, color: "#94a3b8" }}>{isEst ? "est." : "incl. STT+GST"}</div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* MAX PTS */}
+                    <div className="px-2 py-2.5">
+                      {(a.peakMove ?? 0) > 0 ? (
+                        <div className="text-[11px] font-bold tabular-nums text-[#7c3aed]" style={MONO}>+{a.peakMove.toFixed(2)}</div>
+                      ) : (
+                        <div className="text-[9px] text-[#94a3b8]" style={MONO}>—</div>
+                      )}
+                    </div>
+
+                    {/* MAX PROFITS */}
+                    <div className="px-2 py-2.5">
+                      {(a.peakMove ?? 0) > 0 ? (
+                        <>
+                          <div className="text-[12px] font-bold tabular-nums leading-tight" style={{ ...MONO, color: "#7c3aed" }}>
+                            +₹{fmtFull(a.peakMove * LOT_QTY)}
+                          </div>
+                          <div className="text-[8px] font-bold tabular-nums mt-0.5" style={{ ...MONO, color: "#7c3aed" }}>
+                            {a.peakMove.toFixed(2)} × {LOT_QTY}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-[9px] text-[#94a3b8]" style={MONO}>—</div>
+                      )}
+                    </div>
+
+                    {/* Chart + watchlist */}
+                    <div className="px-2 py-2.5 flex items-center justify-center gap-1">
+                      {a.strike && a.direction && (
+                        <button
+                          onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE", a.leg?.tradingsymbol); }}
+                          title="Open chart"
+                          className="w-5 h-5 flex items-center justify-center cursor-pointer"
+                          style={{ color: dirClr, opacity: 0.7 }}
+                        >
+                          <CandleIcon color={dirClr} />
+                        </button>
+                      )}
+                      {a.leg && a.status === "ACTIVE" && (
+                        <button
+                          onClick={() => onAddWatch(a.leg)}
+                          title="Add to watchlist"
+                          className="w-6 h-6 flex items-center justify-center rounded text-[11px] font-bold border cursor-pointer transition-all"
+                          style={{ background: `${dirClr}15`, borderColor: `${dirClr}50`, color: dirClr }}
+                        >
+                          +
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ── Footer stats ── */}
+      {tableAlerts.length > 0 && (
+        <div className="hidden md:block flex-shrink-0 border-t border-[#cbd5e1] bg-white">
+          {mode === "backtest" && histResults !== null && (
+            <div className="px-5 py-1.5 bg-[#fef9ec] border-b border-[#fde68a] text-[8px] text-[#b45309]" style={MONO}>
+              ◉ BACKTEST {histDate} · expiry {expiry} · entry only checked at 09:30 · EOD = position open at 15:30
+            </div>
+          )}
+          <div className="grid grid-cols-4 sm:grid-cols-6" style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#cbd5e1" }}>
+            {[
+              { label: "TOTAL TRADES", val: `${tableAlerts.length}`, color: "#475569" },
+              { label: "ACTIVE",       val: `${active}`,             color: "#0284c7" },
+              { label: "TARGET HIT",   val: `${wins}`,               color: "#16a34a" },
+              { label: "SL HIT",       val: `${losses}`,             color: "#e11d48" },
+              {
+                label: "WIN RATE",
+                val:   wr ? `${wr}%` : "—",
+                color: wr && Number(wr) >= 70 ? "#16a34a" : "#e11d48",
+              },
+              {
+                label: `LOT P&L (${LOT_QTY}×)`,
+                val: tableAlerts.length > 0
+                  ? `${totalLotPnl >= 0 ? "+" : "−"}₹${fmtFull(totalLotPnl)}`
+                  : "—",
+                color: totalLotPnl >= 0 ? "#16a34a" : "#e11d48",
+                sub: active > 0
+                  ? `realized ${totalLotPnl >= 0 ? "+" : "−"}₹${fmtFull(realizedLotPnl)}`
+                  : undefined,
+              },
+            ].map(({ label, val, color, sub }: any) => (
+              <div key={label} className="bg-white px-3 py-2.5">
+                <div className="text-[7px] tracking-[1.5px] text-[#64748b] uppercase mb-1" style={MONO}>{label}</div>
+                <div className="text-[15px] font-bold leading-tight" style={{ ...MONO, color }}>{val}</div>
+                {sub && <div className="text-[7px] text-[#94a3b8] mt-0.5" style={MONO}>{sub}</div>}
               </div>
             ))}
           </div>

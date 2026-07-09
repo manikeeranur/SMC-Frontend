@@ -501,8 +501,8 @@ function fmtDateCell(d: string) {
   return { top: `${parseInt(day)} ${MONTH_SHORT[parseInt(m) - 1]}`, bot: y };
 }
 
-function JournalTradesSection({ isDark, border, color, muted }: {
-  isDark: boolean; border: string; color: string; muted: string;
+function JournalTradesSection({ isDark, border, color, muted, strategy }: {
+  isDark: boolean; border: string; color: string; muted: string; strategy: "smc" | "vwap930";
 }) {
   const [tradeDates, setTradeDates] = useState<string[]>([]);
   const [allRows,    setAllRows]    = useState<Row[]>([]);
@@ -527,17 +527,17 @@ function JournalTradesSection({ isDark, border, color, muted }: {
   // ── Fetch ALL live dates, then load ALL their trades in parallel ──────────────
   useEffect(() => {
     setLoading(true);
-    fetch(`${API}/api/results`, { cache: "no-store" })
+    fetch(`${API}/api/results?strategy=${strategy}`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => {
         const live = (d.live ?? []) as string[];
         setTradeDates(live);
-        if (!live.length) { setLoading(false); return; }
+        if (!live.length) { setLoading(false); setAllRows([]); return; }
         setProgress({ done: 0, total: live.length });
         let done = 0;
         Promise.all(
           live.map(date =>
-            fetch(`${API}/api/results?type=live&date=${date}`, { cache: "no-store" })
+            fetch(`${API}/api/results?type=live&date=${date}&strategy=${strategy}`, { cache: "no-store" })
               .then(r => r.json())
               .then(data => ({ date, rows: (data.rows ?? []) as Row[] }))
               .catch(() => ({ date, rows: [] as Row[] }))
@@ -556,7 +556,7 @@ function JournalTradesSection({ isDark, border, color, muted }: {
         }).finally(() => setLoading(false));
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [strategy]);
 
   const months = useMemo(() => {
     const ms = [...new Set(tradeDates.map(d => d.slice(0, 7)))].sort().reverse();
@@ -1155,6 +1155,7 @@ export function TradingJournalContent() {
   const isDark = theme === "dark";
 
   const [viewType, setViewType] = useState<ViewType>("month");
+  const [strategy, setStrategy] = useState<"smc" | "vwap930">("smc");
   const [summary, setSummary]   = useState<DaySummary[]>([]);
   const [summaryMap, setSummaryMap] = useState<Record<string, DaySummary>>({});
   const [calMonth, setCalMonth] = useState(() => {
@@ -1168,7 +1169,7 @@ export function TradingJournalContent() {
   const muted  = isDark ? "#4a6080" : "#94a3b8";
 
   useEffect(() => {
-    fetch(`${API}/api/results/summary?type=live`, { cache: "no-store" })
+    fetch(`${API}/api/results/summary?type=live&strategy=${strategy}`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => {
         const arr: DaySummary[] = d.summary ?? [];
@@ -1178,7 +1179,7 @@ export function TradingJournalContent() {
         setSummaryMap(m);
       })
       .catch(() => {});
-  }, []);
+  }, [strategy]);
 
   // ── MONTH view data ────────────────────────────────────────────────────────
   const monthSummary = useMemo(() => {
@@ -1280,6 +1281,21 @@ export function TradingJournalContent() {
               {v === "overall" ? "ALL TIME" : v}
             </button>
           ))}
+
+          <div className="flex border rounded-sm overflow-hidden flex-shrink-0"
+            style={{ borderColor: isDark ? "#2a3a4a" : "#cbd5e1" }}>
+            {(["smc", "vwap930"] as const).map(s => (
+              <button key={s} onClick={() => setStrategy(s)}
+                className="px-2 sm:px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors whitespace-nowrap"
+                style={{
+                  ...MONO,
+                  background: strategy === s ? "#0d9488" : "transparent",
+                  color: strategy === s ? "#fff" : (isDark ? "#4a6080" : "#64748b"),
+                }}>
+                {s === "smc" ? "SMC" : "VWAP 9:30"}
+              </button>
+            ))}
+          </div>
 
           {/* Inline navigation */}
           <div className="ml-auto flex items-center gap-2">
@@ -1535,7 +1551,7 @@ export function TradingJournalContent() {
         </>}
 
         {/* ══ TRADES TABLE ══ */}
-        <JournalTradesSection isDark={isDark} border={border} color={color} muted={muted} />
+        <JournalTradesSection isDark={isDark} border={border} color={color} muted={muted} strategy={strategy} />
 
       </div>
     </div>

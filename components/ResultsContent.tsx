@@ -105,6 +105,7 @@ export function ResultsContent() {
   const isDark = theme === "dark";
 
   const [tab, setTab]           = useState<"backtest" | "live">("live");
+  const [strategy, setStrategy] = useState<"smc" | "vwap930">("smc");
   const [dates, setDates]       = useState<{ backtest: string[]; live: string[] }>({ backtest: [], live: [] });
   const [selDate, setSelDate]   = useState("");
   const [rows, setRows]         = useState<Row[]>([]);
@@ -118,7 +119,7 @@ export function ResultsContent() {
   });
 
   useEffect(() => {
-    fetch(`${API}/api/results`, { cache: "no-store" })
+    fetch(`${API}/api/results?strategy=${strategy}`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => {
         setDates(d);
@@ -126,19 +127,19 @@ export function ResultsContent() {
         if (first) setSelDate(first);
       })
       .catch(() => setErr("Failed to load dates"));
-  }, []);
+  }, [strategy]);
 
   useEffect(() => {
     const first = dates[tab]?.[0] ?? "";
     setSelDate(first);
     setRows([]);
-  }, [tab]);
+  }, [tab, strategy]);
 
   useEffect(() => {
     if (!selDate) return;
     setLoading(true);
     setErr("");
-    fetch(`${API}/api/results?type=${tab}&date=${selDate}`, { cache: "no-store" })
+    fetch(`${API}/api/results?type=${tab}&date=${selDate}&strategy=${strategy}`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => {
         if (d.error) { setErr(d.error); setRows([]); }
@@ -146,15 +147,15 @@ export function ResultsContent() {
       })
       .catch(() => setErr("Failed to load data"))
       .finally(() => setLoading(false));
-  }, [selDate, tab]);
+  }, [selDate, tab, strategy]);
 
   // Fetch per-day summary for calendar view
   useEffect(() => {
-    fetch(`${API}/api/results/summary?type=${tab}`, { cache: "no-store" })
+    fetch(`${API}/api/results/summary?type=${tab}&strategy=${strategy}`, { cache: "no-store" })
       .then(r => r.json())
       .then(d => setSummary(d.summary ?? []))
       .catch(() => {});
-  }, [tab]);
+  }, [tab, strategy]);
 
   const summaryMap = useMemo(() => {
     const m: Record<string, DaySummary> = {};
@@ -201,6 +202,21 @@ export function ResultsContent() {
                 color: tab === t ? "#fff" : isDark ? "#64748b" : "#64748b",
               }}>
               {t === "backtest" ? "◉ BACKTEST" : "▶ LIVE"}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex border rounded-sm overflow-hidden flex-shrink-0"
+          style={{ borderColor: isDark ? "#1e2a3a" : "#cbd5e1" }}>
+          {(["smc", "vwap930"] as const).map(s => (
+            <button key={s} onClick={() => setStrategy(s)}
+              className="px-2 sm:px-3 py-1.5 text-[9px] font-bold tracking-[1px] cursor-pointer transition-colors whitespace-nowrap"
+              style={{
+                ...MONO,
+                background: strategy === s ? "#0d9488" : "transparent",
+                color: strategy === s ? "#fff" : isDark ? "#64748b" : "#64748b",
+              }}>
+              {s === "smc" ? "SMC" : "VWAP 9:30"}
             </button>
           ))}
         </div>

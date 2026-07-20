@@ -53,6 +53,7 @@ import {
 } from "@/components/ui/select";
 import { ResultsContent } from "@/components/ResultsContent";
 import { AccountTab } from "@/components/AccountTab";
+import { useTabIndicator } from "@/lib/useTabIndicator";
 import { TradingJournalContent } from "@/components/TradingJournalContent";
 import TradingChartModal from "@/components/TradingChartModal";
 import WatchlistCombobox, { type SearchResult } from "@/components/WatchlistCombobox";
@@ -323,6 +324,16 @@ function OptionsPageInner() {
 
   const tickRef = useRef<ReturnType<typeof setInterval>>();
   const wsRef   = useRef<WebSocket | null>(null);
+  const [wsConnected,     setWsConnected]     = useState(false);
+  const [hasOpenPosition, setHasOpenPosition] = useState(false);
+
+  // Browser-tab indicator: green while a scanner is actively running or a
+  // position is open; red once scanning has stopped AND the live tick feed
+  // is also down (nothing is being monitored); otherwise the plain default.
+  const scanRunning = !!(smcStatus?.scanActive || vwapStatus?.scanActive);
+  const tabIndicatorColor: "green" | "red" | null =
+    (!scanRunning && !wsConnected) ? "red" : (scanRunning || hasOpenPosition) ? "green" : null;
+  useTabIndicator(tabIndicatorColor);
   // 1-min candle closes per option token → for RSI(14) on watchlist
   const priceHistRef = useRef<
     Record<number, { closes: number[]; lastKey: number }>
@@ -433,7 +444,14 @@ function OptionsPageInner() {
     });
 
     wsRef.current = ws;
-    return () => { ws?.close(); wsRef.current = null; };
+    if (ws) {
+      ws.addEventListener("open",  () => setWsConnected(true));
+      ws.addEventListener("close", () => setWsConnected(false));
+      ws.addEventListener("error", () => setWsConnected(false));
+    } else {
+      setWsConnected(false);
+    }
+    return () => { ws?.close(); wsRef.current = null; setWsConnected(false); };
   }, [authenticated]);
 
   // ── Refresh option chain ────────────────────────────────────────────────────
@@ -2615,7 +2633,7 @@ function OptionsPageInner() {
           {activeTab === "results" && <ResultsContent />}
 
           {/* ── ACCOUNT ── */}
-          {activeTab === "account" && <AccountTab />}
+          {activeTab === "account" && <AccountTab onOpenPositionChange={setHasOpenPosition} />}
 
           {/* ── JOURNAL ── */}
           {activeTab === "journal" && <TradingJournalContent />}

@@ -184,7 +184,7 @@ export const accountApi = {
     orderBook: Array<{
       order_id: string; tradingsymbol: string; transaction_type: string;
       quantity: number; price: number; trigger_price: number;
-      order_type: string; status: string; time: string | null;
+      order_type: string; status: string; status_message: string | null; time: string | null;
     }>;
   }>("/api/account"),
 };
@@ -198,11 +198,14 @@ export type AccountDefaults = {
   tradingMode: "LIVE" | "PAPER";
 };
 
+export type GlobalLock = { on: boolean; pts: number | null };
+
 export type SettingsDoc = {
   key: string;
   smcAutoTradeEnabled: boolean;
   vwap930AutoTradeEnabled: boolean;
   accountDefaults: AccountDefaults;
+  globalLock: GlobalLock;
   updatedAt: string;
 };
 
@@ -210,6 +213,11 @@ export const settingsApi = {
   get: () => req<SettingsDoc>("/api/settings"),
   updateAccountDefaults: (patch: Partial<AccountDefaults>) =>
     req<SettingsDoc>("/api/settings/account-defaults", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  updateGlobalLock: (patch: Partial<GlobalLock>) =>
+    req<SettingsDoc>("/api/settings/global-lock", {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),

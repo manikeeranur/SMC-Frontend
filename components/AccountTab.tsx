@@ -34,27 +34,20 @@ function saveSLTP(tradingsymbol: string, patch: Partial<SLTPStore>) {
   } catch {}
 }
 
-type GlobalLockStore = { on: boolean; pts: number | null };
-const GLOBAL_LOCK_KEY = "algo:globalLock";
-
-function loadGlobalLock(): GlobalLockStore {
-  if (typeof window === "undefined") return { on: false, pts: null };
-  try {
-    const raw = window.localStorage.getItem(GLOBAL_LOCK_KEY);
-    return raw ? JSON.parse(raw) : { on: false, pts: null };
-  } catch { return { on: false, pts: null }; }
-}
-
-function saveGlobalLock(store: GlobalLockStore) {
-  if (typeof window === "undefined") return;
-  try { window.localStorage.setItem(GLOBAL_LOCK_KEY, JSON.stringify(store)); } catch {}
-}
 
 type AccountData = Awaited<ReturnType<typeof accountApi.get>>;
 type Position    = AccountData["positions"][number];
 
 function fmt(n: number, d = 2) {
   return n.toLocaleString("en-IN", { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+// Kite's raw order rejection/cancellation messages embed plain decimal amounts
+// (e.g. "Margin required: 1745760.90") — reformat those into ₹17,45,760.90
+// style without touching non-currency numbers (order IDs, quantities, etc.,
+// which don't carry a decimal point in these messages).
+function formatKiteMessage(msg: string): string {
+  return msg.replace(/\d+\.\d+/g, match => `₹${fmt(parseFloat(match))}`);
 }
 
 // ─── Summary card wrapper ─────────────────────────────────────────────────────
@@ -176,6 +169,127 @@ function MobileCompactCard({ title, icon, accent, onClick, children }: {
       </div>
       <div className="px-2 pb-2.5">{children}</div>
     </button>
+  );
+}
+
+// ─── Modern segmented toggle — replaces native <select> for small option sets
+function SegmentToggle<T extends string | number>({ options, value, onChange, activeColor }: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  activeColor: string;
+}) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
+  return (
+    <div className="inline-flex rounded-lg p-0.5 gap-0.5 flex-wrap"
+      style={{ background: isDark ? "#1e293b" : "#eef1f6" }}>
+      {options.map(opt => {
+        const active = opt.value === value;
+        return (
+          <button key={String(opt.value)} type="button" onClick={() => onChange(opt.value)}
+            className="px-2.5 py-1 rounded-md text-[10px] font-bold transition-all duration-150 active:scale-95"
+            style={{
+              background: active ? activeColor : "transparent",
+              color:      active ? "#fff" : (isDark ? "#94a3b8" : "#64748b"),
+              ...MONO,
+            }}>
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Toggle-switch row — one exact, shared design used for "Lock All", Lock
+// Points, Stop Loss, and Target: a full-width card, toggle + label on the
+// left, an input that stretches to fill the row, a "Set All" button, and an
+// "active" badge — so every one of these settings looks and behaves identically.
+function ToggleField({ label, show, onToggle, value, input, setInput, onApply, activeColor }: {
+  label: string;
+  show: boolean;
+  onToggle: () => void;
+  value: number | null;
+  input: string;
+  setInput: (v: string) => void;
+  onApply: () => void;
+  activeColor: string;
+}) {
+  const { theme } = useTheme();
+  const isDark  = theme === "dark";
+  const text    = isDark ? "#e2e8f0" : "#1a2332";
+
+  return (
+    <div className="flex items-center gap-2.5 flex-wrap px-3.5 py-2.5 rounded-2xl transition-colors duration-200"
+      style={{ background: isDark ? "#0f172a" : "#f8f8ff",
+               border: `1px solid ${show ? `${activeColor}50` : (isDark ? "#1e293b" : "#e2e8f0")}`,
+               boxShadow: show ? `0 0 0 3px ${activeColor}12` : "none" }}>
+      <button onClick={onToggle} className="flex items-center gap-2 flex-shrink-0 active:scale-95 transition-transform">
+        <div className="relative w-10 h-[22px] rounded-full transition-colors duration-200"
+          style={{ background: show ? activeColor : (isDark ? "#334155" : "#cbd5e1") }}>
+          <div className="absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"
+            style={{ transform: show ? "translateX(20px)" : "translateX(3px)" }} />
+        </div>
+        <span className="text-[11px] font-bold flex items-center gap-1" style={{ color: show ? activeColor : text }}>
+          {label}
+        </span>
+      </button>
+
+      {show && (
+        <>
+          <input
+            type="number" min="1" value={input} onChange={e => setInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && onApply()} placeholder="pts e.g. 10"
+            className="flex-1 rounded-lg px-2.5 py-1.5 text-[11px] font-bold outline-none min-w-[90px]"
+            style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${activeColor}40`, ...MONO }}
+          />
+          <button onClick={onApply} className="px-3 py-1.5 rounded-lg text-[10px] font-bold text-white flex-shrink-0 active:scale-95 transition-transform"
+            style={{ background: activeColor }}>
+            Set All
+          </button>
+          {value != null && (
+            <span className="text-[9px] font-bold flex-shrink-0 whitespace-nowrap px-2 py-1 rounded-lg"
+              style={{ background: `${activeColor}15`, color: activeColor }}>
+              +{value} pts active
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Toast notifications — transient confirmation for every settings change ──
+type ToastKind = "success" | "error";
+type ToastItem = { id: number; text: string; kind: ToastKind };
+
+function ToastStack({ toasts }: { toasts: ToastItem[] }) {
+  if (!toasts.length) return null;
+  return (
+    <div className="fixed left-1/2 bottom-5 z-[999] flex flex-col items-center gap-2 px-4"
+      style={{ transform: "translateX(-50%)" }}>
+      {toasts.map(t => (
+        <div key={t.id}
+          className="toast-pop flex items-center gap-2 px-4 py-2.5 rounded-xl text-[11px] font-bold"
+          style={{
+            background: t.kind === "success" ? "#16a34a" : "#e11d48",
+            color: "#fff", ...MONO,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.28)",
+            maxWidth: "min(90vw, 360px)",
+          }}>
+          <span>{t.kind === "success" ? "✓" : "✕"}</span>
+          <span className="truncate">{t.text}</span>
+        </div>
+      ))}
+      <style jsx>{`
+        .toast-pop { animation: toastPop 0.22s ease-out; }
+        @keyframes toastPop {
+          from { opacity: 0; transform: translateY(10px) scale(0.97); }
+          to   { opacity: 1; transform: translateY(0) scale(1); }
+        }
+      `}</style>
+    </div>
   );
 }
 
@@ -827,7 +941,7 @@ function ReportDownloader({ todayData }: { todayData: AccountData }) {
 }
 
 // ─── Main tab ─────────────────────────────────────────────────────────────────
-export function AccountTab() {
+export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (hasOpen: boolean) => void } = {}) {
   const { theme } = useTheme();
   const isDark  = theme === "dark";
   const border  = isDark ? "#1e293b" : "#e2e8f0";
@@ -844,28 +958,52 @@ export function AccountTab() {
   const [exitError,     setExitError]     = useState("");
   const [activeModal,   setActiveModal]   = useState<"wallet" | "charges" | "pnl" | null>(null);
 
-  // Global lock points — hydrated from localStorage so it survives a page refresh
-  const [globalLockOn,    setGlobalLockOn]    = useState(() => loadGlobalLock().on);
-  const [globalLockInput, setGlobalLockInput] = useState(() => { const v = loadGlobalLock().pts; return v != null ? String(v) : ""; });
-  const [globalLockPts,   setGlobalLockPts]   = useState<number | null>(() => loadGlobalLock().pts);
+  // Toasts — every settings change below confirms (or reports failure) here
+  // instead of a static inline error line.
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  function showToast(text: string, kind: ToastKind = "success") {
+    const id = Date.now() + Math.random();
+    setToasts(t => [...t, { id, text, kind }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 2800);
+  }
 
-  function applyGlobalLock() {
+  // Global lock points — DB-backed via /api/settings so laptop/phone/any
+  // device agree on the same value (previously localStorage-only, which is
+  // why it could show 100 on one device and something else on another).
+  const [globalLockOn,    setGlobalLockOn]    = useState(false);
+  const [globalLockInput, setGlobalLockInput] = useState("");
+  const [globalLockPts,   setGlobalLockPts]   = useState<number | null>(null);
+
+  async function applyGlobalLock() {
     const pts = parseFloat(globalLockInput);
-    if (!isNaN(pts) && pts > 0) {
-      setGlobalLockPts(pts);
-      saveGlobalLock({ on: true, pts });
+    if (isNaN(pts) || pts <= 0) return;
+    const prevOn = globalLockOn, prevPts = globalLockPts;
+    setGlobalLockOn(true); setGlobalLockPts(pts);
+    try {
+      await settingsApi.updateGlobalLock({ on: true, pts });
+      showToast(`Lock All set to +${pts} pts`);
+    } catch (e: any) {
+      setGlobalLockOn(prevOn); setGlobalLockPts(prevPts);
+      showToast(`Failed to save Lock All — ${e.message}`, "error");
     }
   }
 
-  function toggleGlobalLock() {
+  async function toggleGlobalLock() {
+    const prevOn = globalLockOn, prevPts = globalLockPts, prevInput = globalLockInput;
     if (globalLockOn) {
-      setGlobalLockOn(false);
-      setGlobalLockPts(null);
-      setGlobalLockInput("");
-      saveGlobalLock({ on: false, pts: null });
+      setGlobalLockOn(false); setGlobalLockPts(null); setGlobalLockInput("");
+      try { await settingsApi.updateGlobalLock({ on: false, pts: null }); showToast("Lock All disabled"); }
+      catch (e: any) {
+        setGlobalLockOn(prevOn); setGlobalLockPts(prevPts); setGlobalLockInput(prevInput);
+        showToast(`Failed to update Lock All — ${e.message}`, "error");
+      }
     } else {
       setGlobalLockOn(true);
-      saveGlobalLock({ on: true, pts: globalLockPts });
+      try { await settingsApi.updateGlobalLock({ on: true, pts: globalLockPts }); showToast("Lock All enabled"); }
+      catch (e: any) {
+        setGlobalLockOn(prevOn);
+        showToast(`Failed to update Lock All — ${e.message}`, "error");
+      }
     }
   }
 
@@ -874,10 +1012,15 @@ export function AccountTab() {
   // they survive refresh/restart/other devices; falls back to today's
   // hardcoded backend constants if the fetch fails.
   const [accountDefaults, setAccountDefaults] = useState<AccountDefaults | null>(null);
-  const [defaultsError,   setDefaultsError]   = useState("");
   const [defLockInput,    setDefLockInput]    = useState("");
   const [defSlInput,      setDefSlInput]      = useState("");
   const [defTargetInput,  setDefTargetInput]  = useState("");
+
+  // Whether each field's toggle is open (input visible) — same on/off pattern
+  // as "Lock All", so the whole panel is one consistent toggle-switch UI.
+  const [showDefLock,   setShowDefLock]   = useState(false);
+  const [showDefSl,     setShowDefSl]     = useState(false);
+  const [showDefTarget, setShowDefTarget] = useState(false);
 
   useEffect(() => {
     settingsApi.get()
@@ -886,29 +1029,57 @@ export function AccountTab() {
         setDefLockInput(s.accountDefaults.lockPoints != null ? String(s.accountDefaults.lockPoints) : "");
         setDefSlInput(s.accountDefaults.stopLoss   != null ? String(s.accountDefaults.stopLoss)   : "");
         setDefTargetInput(s.accountDefaults.target != null ? String(s.accountDefaults.target)     : "");
+        setShowDefLock(s.accountDefaults.lockPoints != null);
+        setShowDefSl(s.accountDefaults.stopLoss     != null);
+        setShowDefTarget(s.accountDefaults.target   != null);
+        setGlobalLockOn(s.globalLock?.on ?? false);
+        setGlobalLockPts(s.globalLock?.pts ?? null);
+        setGlobalLockInput(s.globalLock?.pts != null ? String(s.globalLock.pts) : "");
       })
       .catch(() => setAccountDefaults({
         lockPoints: null, stopLoss: null, target: null,
-        quantity: 10, productType: "MIS", tradingMode: "LIVE",
+        quantity: 10, productType: "MIS", tradingMode: "PAPER",
       }));
   }, []);
 
-  async function updateAccountDefaults(patch: Partial<AccountDefaults>) {
+  async function updateAccountDefaults(patch: Partial<AccountDefaults>, label: string) {
     const prev = accountDefaults;
     setAccountDefaults(d => (d ? { ...d, ...patch } : d));
     try {
       const updated = await settingsApi.updateAccountDefaults(patch);
       setAccountDefaults(updated.accountDefaults);
-      setDefaultsError("");
+      showToast(label);
     } catch (e: any) {
       setAccountDefaults(prev);
-      setDefaultsError(`Failed to save — ${e.message}`);
+      showToast(`Failed to save — ${e.message}`, "error");
     }
   }
 
-  function saveDefLock()   { const v = defLockInput === "" ? null : parseFloat(defLockInput);   if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ lockPoints: v }); }
-  function saveDefSl()     { const v = defSlInput   === "" ? null : parseFloat(defSlInput);     if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ stopLoss:   v }); }
-  function saveDefTarget() { const v = defTargetInput === "" ? null : parseFloat(defTargetInput); if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ target:    v }); }
+  function saveDefLock() {
+    const v = defLockInput === "" ? null : parseFloat(defLockInput);
+    if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ lockPoints: v }, v === null ? "Default Lock Points cleared" : `Default Lock Points set to ${v}`);
+  }
+  function saveDefSl() {
+    const v = defSlInput === "" ? null : parseFloat(defSlInput);
+    if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ stopLoss: v }, v === null ? "Default Stop Loss cleared" : `Default Stop Loss set to ${v} pts`);
+  }
+  function saveDefTarget() {
+    const v = defTargetInput === "" ? null : parseFloat(defTargetInput);
+    if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ target: v }, v === null ? "Default Target cleared" : `Default Target set to ${v} pts`);
+  }
+
+  function toggleDefLock() {
+    if (showDefLock) { setShowDefLock(false); setDefLockInput(""); updateAccountDefaults({ lockPoints: null }, "Default Lock Points disabled"); }
+    else setShowDefLock(true);
+  }
+  function toggleDefSl() {
+    if (showDefSl) { setShowDefSl(false); setDefSlInput(""); updateAccountDefaults({ stopLoss: null }, "Default Stop Loss disabled"); }
+    else setShowDefSl(true);
+  }
+  function toggleDefTarget() {
+    if (showDefTarget) { setShowDefTarget(false); setDefTargetInput(""); updateAccountDefaults({ target: null }, "Default Target disabled"); }
+    else setShowDefTarget(true);
+  }
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -961,6 +1132,16 @@ export function AccountTab() {
   }, []);
 
   const displayPositions = [...(livePositions ?? data?.positions ?? [])].reverse();
+
+  // Report open-position state up to the page — the browser-tab favicon/title
+  // indicator lives there since it also needs scan/WS status this component
+  // doesn't have. Keyed off a derived boolean, not the `displayPositions`
+  // array itself, since that array gets a new reference on every 500ms poll
+  // tick — keying off it directly would fire the callback twice a second.
+  const hasOpenPosition = displayPositions.some(p => p.status === "OPEN");
+  useEffect(() => {
+    onOpenPositionChange?.(hasOpenPosition);
+  }, [hasOpenPosition, onOpenPositionChange]);
 
   // ── Exit a single position ─────────────────────────────────────────────────
   async function handleExit(tradingsymbol: string, quantity: number) {
@@ -1402,123 +1583,69 @@ export function AccountTab() {
             </div>
           </div>
 
-          {/* ── Global lock points toggle row ── */}
-          <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl"
-            style={{ background: isDark ? "#0f172a" : "#f8f8ff", border: `1px solid ${globalLockOn ? "#6366f140" : (isDark ? "#1e293b" : "#e2e8f0")}` }}>
-            {/* Toggle button */}
-            <button
-              onClick={toggleGlobalLock}
-              className="flex items-center gap-1.5 flex-shrink-0"
-            >
-              <div className="relative w-8 h-4 rounded-full transition-colors duration-200"
-                style={{ background: globalLockOn ? "#6366f1" : (isDark ? "#334155" : "#cbd5e1") }}>
-                <div className="absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform duration-200"
-                  style={{ transform: globalLockOn ? "translateX(18px)" : "translateX(2px)" }} />
-              </div>
-              <span className="text-[9px] font-bold" style={{ color: globalLockOn ? "#6366f1" : subtext }}>
-                🔒 Lock All
-              </span>
-            </button>
+          {/* ── Lock All / Lock Points / SL / Target — one shared toggle-row
+              design, shown one by one (each its own full-width row) ── */}
+          <div className="flex flex-col gap-2.5 mb-3">
+            <ToggleField label="🔒 Lock All" show={globalLockOn} onToggle={toggleGlobalLock}
+              value={globalLockPts} input={globalLockInput} setInput={setGlobalLockInput}
+              onApply={applyGlobalLock} activeColor="#6366f1" />
 
-            {/* Input + Set — visible only when toggle is ON */}
-            {globalLockOn && (
-              <>
-                <input
-                  type="number"
-                  min="1"
-                  value={globalLockInput}
-                  onChange={e => setGlobalLockInput(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && applyGlobalLock()}
-                  placeholder="pts e.g. 10"
-                  className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold outline-none min-w-0"
-                  style={{ background: isDark ? "#1e293b" : "#fff", color: text,
-                           border: `1px solid #6366f140`, ...MONO }}
-                />
-                <button
-                  onClick={applyGlobalLock}
-                  disabled={!globalLockInput || isNaN(parseFloat(globalLockInput)) || parseFloat(globalLockInput) <= 0}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-white flex-shrink-0 disabled:opacity-40"
-                  style={{ background: "#6366f1" }}>
-                  Set All
-                </button>
-                {globalLockPts !== null && (
-                  <span className="text-[9px] font-bold flex-shrink-0 whitespace-nowrap px-2 py-1 rounded-lg"
-                    style={{ background: "#6366f115", color: "#6366f1" }}>
-                    +{globalLockPts} pts active
-                  </span>
-                )}
-              </>
-            )}
+            <ToggleField label="🔒 Lock Points" show={showDefLock} onToggle={toggleDefLock}
+              value={accountDefaults?.lockPoints ?? null} input={defLockInput} setInput={setDefLockInput}
+              onApply={saveDefLock} activeColor="#6366f1" />
+
+            <ToggleField label="🛑 Stop Loss" show={showDefSl} onToggle={toggleDefSl}
+              value={accountDefaults?.stopLoss ?? null} input={defSlInput} setInput={setDefSlInput}
+              onApply={saveDefSl} activeColor="#e11d48" />
+
+            <ToggleField label="🎯 Target" show={showDefTarget} onToggle={toggleDefTarget}
+              value={accountDefaults?.target ?? null} input={defTargetInput} setInput={setDefTargetInput}
+              onApply={saveDefTarget} activeColor="#16a34a" />
           </div>
 
           {/* ── Auto-trade account defaults (persisted to DB) ── */}
-          <div className="flex flex-col gap-2 mb-3 px-3 py-3 rounded-xl"
+          <div className="flex flex-col gap-3 mb-3 px-3.5 py-3.5 rounded-2xl"
             style={{ background: isDark ? "#0f172a" : "#f8f8ff", border: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
             <span className="text-[9px] font-bold uppercase tracking-[1px]" style={{ ...MONO, color: subtext }}>
               ⚙ Auto-Trade Defaults
             </span>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px]" style={{ color: subtext }}>Qty</span>
-              <select
-                value={accountDefaults?.quantity ?? 10}
-                onChange={e => updateAccountDefaults({ quantity: Number(e.target.value) as 5 | 10 | 15 | 20 })}
-                className="rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
-                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }}>
-                {[5, 10, 15, 20].map(q => <option key={q} value={q}>{q} lot{q > 1 ? "s" : ""}</option>)}
-              </select>
 
-              <span className="text-[10px]" style={{ color: subtext }}>Product</span>
-              <select
-                value={accountDefaults?.productType ?? "MIS"}
-                onChange={e => updateAccountDefaults({ productType: e.target.value as "MIS" | "NRML" })}
-                className="rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
-                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }}>
-                <option value="MIS">MIS</option>
-                <option value="NRML">NRML</option>
-              </select>
+            {/* One control per row on mobile (flex-col — easier to tap, no
+                cramped wrapping); a single line on large screens. */}
+            <div className="flex flex-col lg:flex-row lg:flex-nowrap lg:items-center gap-2.5 lg:gap-4 lg:overflow-x-auto">
+              <div className="flex items-center justify-between lg:justify-start w-full lg:w-auto gap-2 flex-shrink-0">
+                <span className="text-[10px] font-semibold" style={{ color: subtext }}>Qty</span>
+                <SegmentToggle
+                  options={[5, 10, 15, 20].map(q => ({ value: q, label: String(q) }))}
+                  value={accountDefaults?.quantity ?? 10}
+                  activeColor="#6366f1"
+                  onChange={v => updateAccountDefaults({ quantity: v as 5 | 10 | 15 | 20 }, `Quantity set to ${v} lots`)}
+                />
+              </div>
 
-              <span className="text-[10px]" style={{ color: subtext }}>Mode</span>
-              <select
-                value={accountDefaults?.tradingMode ?? "LIVE"}
-                onChange={e => updateAccountDefaults({ tradingMode: e.target.value as "LIVE" | "PAPER" })}
-                className="rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
-                style={{ background: isDark ? "#1e293b" : "#fff",
-                         color: accountDefaults?.tradingMode === "PAPER" ? "#f59e0b" : text,
-                         border: `1px solid ${accountDefaults?.tradingMode === "PAPER" ? "#f59e0b" : border}`, ...MONO }}>
-                <option value="LIVE">LIVE</option>
-                <option value="PAPER">PAPER</option>
-              </select>
+              <div className="flex items-center justify-between lg:justify-start w-full lg:w-auto gap-2 flex-shrink-0">
+                <span className="text-[10px] font-semibold" style={{ color: subtext }}>Product</span>
+                <SegmentToggle
+                  options={[{ value: "MIS", label: "MIS" }, { value: "NRML", label: "NRML" }]}
+                  value={accountDefaults?.productType ?? "MIS"}
+                  activeColor="#0284c7"
+                  onChange={v => updateAccountDefaults({ productType: v as "MIS" | "NRML" }, `Product set to ${v}`)}
+                />
+              </div>
+
+              <div className="flex items-center justify-between lg:justify-start w-full lg:w-auto gap-2 flex-shrink-0">
+                <span className="text-[10px] font-semibold" style={{ color: subtext }}>Mode</span>
+                <SegmentToggle
+                  options={[{ value: "LIVE", label: "LIVE" }, { value: "PAPER", label: "PAPER" }]}
+                  value={accountDefaults?.tradingMode ?? "PAPER"}
+                  activeColor={accountDefaults?.tradingMode === "PAPER" ? "#f59e0b" : "#16a34a"}
+                  onChange={v => updateAccountDefaults(
+                    { tradingMode: v as "LIVE" | "PAPER" },
+                    v === "PAPER" ? "PAPER mode enabled — orders will be simulated" : "LIVE mode enabled — real orders will be placed"
+                  )}
+                />
+              </div>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px]" style={{ color: subtext }}>Lock Pts</span>
-              <input type="number" min="1" value={defLockInput} onChange={e => setDefLockInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && saveDefLock()} placeholder="off"
-                className="w-16 rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
-                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }} />
-              <button onClick={saveDefLock} className="px-2 py-1 rounded-lg text-[10px] font-bold text-white"
-                style={{ background: "#6366f1" }}>Set</button>
-
-              <span className="text-[10px]" style={{ color: subtext }}>SL pts</span>
-              <input type="number" min="1" value={defSlInput} onChange={e => setDefSlInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && saveDefSl()} placeholder="off"
-                className="w-16 rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
-                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }} />
-              <button onClick={saveDefSl} className="px-2 py-1 rounded-lg text-[10px] font-bold text-white"
-                style={{ background: "#e11d48" }}>Set</button>
-
-              <span className="text-[10px]" style={{ color: subtext }}>Target pts</span>
-              <input type="number" min="1" value={defTargetInput} onChange={e => setDefTargetInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && saveDefTarget()} placeholder="off"
-                className="w-16 rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
-                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }} />
-              <button onClick={saveDefTarget} className="px-2 py-1 rounded-lg text-[10px] font-bold text-white"
-                style={{ background: "#16a34a" }}>Set</button>
-            </div>
-
-            {defaultsError && (
-              <span className="text-[9px]" style={{ color: "#e11d48" }}>{defaultsError}</span>
-            )}
           </div>
 
           {exitError && (
@@ -1578,33 +1705,41 @@ export function AccountTab() {
                 const statusColor = isComplete ? "#16a34a" : isReject ? "#e11d48" : "#f59e0b";
                 return (
                   <div key={o.order_id}
-                    className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t" : ""}`}
+                    className={`px-3 py-2.5 ${i > 0 ? "border-t" : ""}`}
                     style={{ borderColor: border }}>
-                    {/* B/S pill */}
-                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0 w-9 flex justify-center items-center"
-                      style={{
-                        ...MONO,
-                        background: isBuy ? "#16a34a18" : "#e11d4818",
-                        color: isBuy ? "#16a34a" : "#e11d48",
-                      }}>
-                      {o.transaction_type}
-                    </span>
-                    {/* Symbol */}
-                    <span className="flex-1 text-[10px] font-bold truncate" style={{ ...MONO, color: text }}>
-                      {formatSymbol(o.tradingsymbol)}
-                    </span>
-                    {/* Qty + price */}
-                    <span className="text-[10px] flex-shrink-0" style={{ ...MONO, color: muted }}>
-                      {o.quantity} × {o.price > 0 ? `₹${fmt(o.price)}` : (o.trigger_price > 0 ? `SL ₹${fmt(o.trigger_price)}` : "MKT")}
-                    </span>
-                    {/* Status */}
-                    <span className="text-[9px] font-bold flex-shrink-0" style={{ ...MONO, color: statusColor }}>
-                      {o.status}
-                    </span>
-                    {/* Time */}
-                    <span className="text-[9px] flex-shrink-0" style={{ ...MONO, color: subtext }}>
-                      {o.time ?? "—"}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      {/* B/S pill */}
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded flex-shrink-0 w-9 flex justify-center items-center"
+                        style={{
+                          ...MONO,
+                          background: isBuy ? "#16a34a18" : "#e11d4818",
+                          color: isBuy ? "#16a34a" : "#e11d48",
+                        }}>
+                        {o.transaction_type}
+                      </span>
+                      {/* Symbol */}
+                      <span className="flex-1 text-[10px] font-bold truncate" style={{ ...MONO, color: text }}>
+                        {formatSymbol(o.tradingsymbol)}
+                      </span>
+                      {/* Qty + price */}
+                      <span className="text-[10px] flex-shrink-0" style={{ ...MONO, color: muted }}>
+                        {o.quantity} × {o.price > 0 ? `₹${fmt(o.price)}` : (o.trigger_price > 0 ? `SL ₹${fmt(o.trigger_price)}` : "MKT")}
+                      </span>
+                      {/* Status */}
+                      <span className="text-[9px] font-bold flex-shrink-0" style={{ ...MONO, color: statusColor }}>
+                        {o.status}
+                      </span>
+                      {/* Time */}
+                      <span className="text-[9px] flex-shrink-0" style={{ ...MONO, color: subtext }}>
+                        {o.time ?? "—"}
+                      </span>
+                    </div>
+                    {/* Rejection/cancellation reason — only shown when Kite provides one */}
+                    {isReject && o.status_message && (
+                      <div className="text-[9px] mt-1 pl-12 truncate" style={{ ...MONO, color: "#e11d48" }} title={formatKiteMessage(o.status_message)}>
+                        ⚠ {formatKiteMessage(o.status_message)}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1612,6 +1747,7 @@ export function AccountTab() {
           )}
         </>
       )}
+      <ToastStack toasts={toasts} />
     </div>
   );
 }

@@ -1,12 +1,54 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { accountApi } from "@/lib/api";
+import { accountApi, settingsApi, type AccountDefaults } from "@/lib/api";
 import { useTheme } from "@/lib/theme";
 import { IconRefresh, IconWallet, IconReceipt, IconChartBar, IconList, IconDownload, IconClock,
          IconArrowUpRight, IconArrowDownLeft, IconPercentage, IconX, IconPower, IconXboxX } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
+
+// ─── SL/TP/Lock persistence (survives page refresh) ──────────────────────────
+type SLTPStore = { sl: number | null; tp: number | null; lockPts: number | null; lockDir: "up" | "down" | null };
+const EMPTY_SLTP: SLTPStore = { sl: null, tp: null, lockPts: null, lockDir: null };
+
+function sltpKey(tradingsymbol: string) { return `algo:sltp:${tradingsymbol}`; }
+
+function loadSLTP(tradingsymbol: string): SLTPStore {
+  if (typeof window === "undefined") return EMPTY_SLTP;
+  try {
+    const raw = window.localStorage.getItem(sltpKey(tradingsymbol));
+    return raw ? { ...EMPTY_SLTP, ...JSON.parse(raw) } : EMPTY_SLTP;
+  } catch { return EMPTY_SLTP; }
+}
+
+function saveSLTP(tradingsymbol: string, patch: Partial<SLTPStore>) {
+  if (typeof window === "undefined") return;
+  try {
+    const next = { ...loadSLTP(tradingsymbol), ...patch };
+    if (next.sl == null && next.tp == null && next.lockPts == null) {
+      window.localStorage.removeItem(sltpKey(tradingsymbol));
+    } else {
+      window.localStorage.setItem(sltpKey(tradingsymbol), JSON.stringify(next));
+    }
+  } catch {}
+}
+
+type GlobalLockStore = { on: boolean; pts: number | null };
+const GLOBAL_LOCK_KEY = "algo:globalLock";
+
+function loadGlobalLock(): GlobalLockStore {
+  if (typeof window === "undefined") return { on: false, pts: null };
+  try {
+    const raw = window.localStorage.getItem(GLOBAL_LOCK_KEY);
+    return raw ? JSON.parse(raw) : { on: false, pts: null };
+  } catch { return { on: false, pts: null }; }
+}
+
+function saveGlobalLock(store: GlobalLockStore) {
+  if (typeof window === "undefined") return;
+  try { window.localStorage.setItem(GLOBAL_LOCK_KEY, JSON.stringify(store)); } catch {}
+}
 
 type AccountData = Awaited<ReturnType<typeof accountApi.get>>;
 type Position    = AccountData["positions"][number];
@@ -196,11 +238,12 @@ function IndexLogo({ symbol, optType }: { symbol: string; optType: "CE" | "PE" }
 }
 
 // ─── Position card — exact Zerodha/Kite style ────────────────────────────────
-function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
+function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }: {
   p: Position;
   onExit?: () => void;
   isExiting?: boolean;
   defaultLockPts?: number | null;
+  accountDefaults?: AccountDefaults | null;
 }) {
   const { theme } = useTheme();
   const isDark  = theme === "dark";
@@ -244,25 +287,27 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
     return null;
   }
 
-  // SL/TP state
+  // SL/TP state — hydrated from localStorage (once, on mount) so it survives a page refresh
   const [showDetail, setShowDetail] = useState(false);
   const [showSLTP,   setShowSLTP]   = useState(false);
-  const [slInput,    setSlInput]    = useState("");
-  const [tpInput,    setTpInput]    = useState("");
-  const [slSet,      setSlSet]      = useState<number | null>(null);
-  const [tpSet,      setTpSet]      = useState<number | null>(null);
+  const [slInput,    setSlInput]    = useState(() => { const v = loadSLTP(p.tradingsymbol).sl; return v != null ? String(v) : ""; });
+  const [tpInput,    setTpInput]    = useState(() => { const v = loadSLTP(p.tradingsymbol).tp; return v != null ? String(v) : ""; });
+  const [slSet,      setSlSet]      = useState<number | null>(() => loadSLTP(p.tradingsymbol).sl);
+  const [tpSet,      setTpSet]      = useState<number | null>(() => loadSLTP(p.tradingsymbol).tp);
 
   // Lock Points state
-  const [lockInput,  setLockInput]  = useState("");
-  const [lockSet,    setLockSet]    = useState<number | null>(null);
-  const [lockDir,    setLockDir]    = useState<"up" | "down" | null>(null);
+  const [lockInput,  setLockInput]  = useState(() => { const v = loadSLTP(p.tradingsymbol).lockPts; return v != null ? String(v) : ""; });
+  const [lockSet,    setLockSet]    = useState<number | null>(() => loadSLTP(p.tradingsymbol).lockPts);
+  const [lockDir,    setLockDir]    = useState<"up" | "down" | null>(() => loadSLTP(p.tradingsymbol).lockDir);
   const lockTarget = lockSet !== null && p.buyPrice > 0 ? p.buyPrice + lockSet : null;
 
   function confirmSLTP() {
     const sl = parseFloat(slInput);
     const tp = parseFloat(tpInput);
-    if (!isNaN(sl) && sl > 0) setSlSet(sl);
-    if (!isNaN(tp) && tp > 0) setTpSet(tp);
+    const patch: Partial<SLTPStore> = {};
+    if (!isNaN(sl) && sl > 0) { setSlSet(sl); patch.sl = sl; }
+    if (!isNaN(tp) && tp > 0) { setTpSet(tp); patch.tp = tp; }
+    if (Object.keys(patch).length) saveSLTP(p.tradingsymbol, patch);
     setShowSLTP(false);
   }
 
@@ -272,8 +317,10 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
       const target = p.buyPrice + pts;
       // CMP above lock target → price must fall DOWN to trigger
       // CMP below lock target → price must rise UP to trigger
-      setLockDir(p.currentPrice >= target ? "down" : "up");
+      const dir = p.currentPrice >= target ? "down" : "up";
+      setLockDir(dir);
       setLockSet(pts);
+      saveSLTP(p.tradingsymbol, { lockPts: pts, lockDir: dir });
     }
   }
 
@@ -307,17 +354,66 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
   // Reset trigger flag when SL/TP/Lock values are changed
   useEffect(() => { triggeredRef.current = false; }, [slSet, tpSet, lockSet, lockDir]);
 
-  // Apply default lock points from global toggle
+  // Trade closed (exited) — drop its stored SL/TP/Lock so a future trade on
+  // the same symbol doesn't inherit stale targets.
   useEffect(() => {
+    if (!isOpen) saveSLTP(p.tradingsymbol, { sl: null, tp: null, lockPts: null, lockDir: null });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // One-time seed from the Accounts-tab account defaults: only for a genuinely
+  // new auto-trade-opened position (p.atStatus set, no existing localStorage
+  // entry yet) — mirrors the real broker SL/Target the backend already set at
+  // entry (see autoTrade.js/vwap930AutoTrade.js executeEntry) purely for
+  // on-screen visibility; does not itself touch the broker order. Runs before
+  // the "Lock All" global-toggle effect below so an active global toggle wins
+  // if both apply.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || !accountDefaults || p.atStatus == null || p.buyPrice <= 0) return;
+    const existing = loadSLTP(p.tradingsymbol);
+    if (existing.sl != null || existing.tp != null || existing.lockPts != null) { seededRef.current = true; return; }
+    seededRef.current = true;
+
+    const patch: Partial<SLTPStore> = {};
+    if (accountDefaults.stopLoss != null) {
+      const sl = +(p.buyPrice - accountDefaults.stopLoss).toFixed(2);
+      setSlSet(sl); setSlInput(String(sl)); patch.sl = sl;
+    }
+    if (accountDefaults.target != null) {
+      const tp = +(p.buyPrice + accountDefaults.target).toFixed(2);
+      setTpSet(tp); setTpInput(String(tp)); patch.tp = tp;
+    }
+    if (accountDefaults.lockPoints != null) {
+      const target = p.buyPrice + accountDefaults.lockPoints;
+      const dir = p.currentPrice >= target ? "down" : "up";
+      setLockSet(accountDefaults.lockPoints); setLockInput(String(accountDefaults.lockPoints)); setLockDir(dir);
+      patch.lockPts = accountDefaults.lockPoints; patch.lockDir = dir;
+    }
+    if (Object.keys(patch).length) saveSLTP(p.tradingsymbol, patch);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountDefaults, p.atStatus]);
+
+  // Apply default lock points from global toggle. Only clears a card's lock
+  // when the global toggle transitions off (prevDefaultLockPts was set) —
+  // not on mount — so a per-card lock hydrated from storage isn't wiped out
+  // just because the global toggle happens to be off on page load.
+  const prevDefaultLockPts = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    const prev = prevDefaultLockPts.current;
+    prevDefaultLockPts.current = defaultLockPts;
     if (defaultLockPts != null && defaultLockPts > 0 && p.buyPrice > 0) {
       const target = p.buyPrice + defaultLockPts;
-      setLockDir(p.currentPrice >= target ? "down" : "up");
+      const dir = p.currentPrice >= target ? "down" : "up";
+      setLockDir(dir);
       setLockSet(defaultLockPts);
       setLockInput(String(defaultLockPts));
-    } else if (defaultLockPts == null) {
+      saveSLTP(p.tradingsymbol, { lockPts: defaultLockPts, lockDir: dir });
+    } else if (defaultLockPts == null && prev != null) {
       setLockSet(null);
       setLockDir(null);
       setLockInput("");
+      saveSLTP(p.tradingsymbol, { lockPts: null, lockDir: null });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultLockPts]);
@@ -326,8 +422,8 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
   const gridRows = [
     [
       { label: "CMP",         value: p.currentPrice > 0 ? `₹${fmt(p.currentPrice)}` : "—" },
-      { label: "Entry Price", value: p.buyPrice > 0     ? `₹${fmt(p.buyPrice)}`     : "—" },
-      { label: "Exit Price",  value: p.sellPrice > 0    ? `₹${fmt(p.sellPrice)}`    : "—" },
+      { label: "Entry Price", value: p.buyPrice > 0     ? `₹${fmt(p.buyPrice)}`     : "—", showCheck: !isOpen && p.buyPrice > 0 },
+      { label: "Exit Price",  value: p.sellPrice > 0    ? `₹${fmt(p.sellPrice)}`    : "—", showCheck: !isOpen && p.sellPrice > 0 },
     ],
     [
       { label: "Entry Time", value: p.entryTime ?? "—"           },
@@ -351,11 +447,19 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
               {displayName}
             </span>
             {/* QTY — top right */}
-            <span className="flex items-center gap-1 text-[11px] font-semibold flex-shrink-0 mt-0.5"
-              style={{ color: isDark ? "#64748b" : "#6b7a90" }}>
-              <span style={{ fontSize: 13 }}>🧳</span>
-              {p.quantity} QTY
-            </span>
+            {isOpen ? (
+              <span className="flex items-center gap-1 text-[11px] font-semibold flex-shrink-0 mt-0.5"
+                style={{ color: isDark ? "#64748b" : "#6b7a90" }}>
+                <span style={{ fontSize: 13 }}>🧳</span>
+                {p.quantity} QTY
+              </span>
+            ) : (
+              <span className="flex items-center gap-1 text-[11px] font-bold flex-shrink-0 mt-0.5 px-1.5 py-0.5 rounded"
+                style={{ color: "#16a34a", background: "#16a34a15" }}>
+                <span style={{ fontSize: 11 }}>✓</span>
+                {p.quantity} QTY Traded
+              </span>
+            )}
           </div>
           {/* Price + % */}
           <div className="flex items-center gap-1.5 mt-0.5">
@@ -457,6 +561,11 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
                     style={{ ...MONO, color: subtext }}>{cell.label}</span>
                   <span className="text-[11px] font-bold leading-tight"
                     style={{ ...MONO, color: text }}>{cell.value}</span>
+                  {"showCheck" in cell && cell.showCheck && (
+                    <span className="flex items-center gap-0.5 text-[8px] font-bold mt-0.5" style={{ color: "#16a34a" }}>
+                      ✓ Traded
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -477,7 +586,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
             <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
               style={{ background: "#e11d4815", color: "#e11d48" }}>
               SL ₹{fmt(slSet)}
-              <button onClick={() => { setSlSet(null); triggeredRef.current = false; }}
+              <button onClick={() => { setSlSet(null); saveSLTP(p.tradingsymbol, { sl: null }); triggeredRef.current = false; }}
                 className="ml-0.5 opacity-60 hover:opacity-100">×</button>
             </span>
           )}
@@ -485,7 +594,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
             <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
               style={{ background: "#16a34a15", color: "#16a34a" }}>
               TP ₹{fmt(tpSet)}
-              <button onClick={() => { setTpSet(null); triggeredRef.current = false; }}
+              <button onClick={() => { setTpSet(null); saveSLTP(p.tradingsymbol, { tp: null }); triggeredRef.current = false; }}
                 className="ml-0.5 opacity-60 hover:opacity-100">×</button>
             </span>
           )}
@@ -493,7 +602,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts }: {
             <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
               style={{ background: "#6366f115", color: "#6366f1" }}>
               🔒 +{lockSet}pts → ₹{fmt(lockTarget)}
-              <button onClick={() => { setLockSet(null); setLockDir(null); setLockInput(""); triggeredRef.current = false; }}
+              <button onClick={() => { setLockSet(null); setLockDir(null); setLockInput(""); saveSLTP(p.tradingsymbol, { lockPts: null, lockDir: null }); triggeredRef.current = false; }}
                 className="ml-0.5 opacity-60 hover:opacity-100">×</button>
             </span>
           )}
@@ -735,14 +844,17 @@ export function AccountTab() {
   const [exitError,     setExitError]     = useState("");
   const [activeModal,   setActiveModal]   = useState<"wallet" | "charges" | "pnl" | null>(null);
 
-  // Global lock points
-  const [globalLockOn,    setGlobalLockOn]    = useState(false);
-  const [globalLockInput, setGlobalLockInput] = useState("");
-  const [globalLockPts,   setGlobalLockPts]   = useState<number | null>(null);
+  // Global lock points — hydrated from localStorage so it survives a page refresh
+  const [globalLockOn,    setGlobalLockOn]    = useState(() => loadGlobalLock().on);
+  const [globalLockInput, setGlobalLockInput] = useState(() => { const v = loadGlobalLock().pts; return v != null ? String(v) : ""; });
+  const [globalLockPts,   setGlobalLockPts]   = useState<number | null>(() => loadGlobalLock().pts);
 
   function applyGlobalLock() {
     const pts = parseFloat(globalLockInput);
-    if (!isNaN(pts) && pts > 0) setGlobalLockPts(pts);
+    if (!isNaN(pts) && pts > 0) {
+      setGlobalLockPts(pts);
+      saveGlobalLock({ on: true, pts });
+    }
   }
 
   function toggleGlobalLock() {
@@ -750,10 +862,53 @@ export function AccountTab() {
       setGlobalLockOn(false);
       setGlobalLockPts(null);
       setGlobalLockInput("");
+      saveGlobalLock({ on: false, pts: null });
     } else {
       setGlobalLockOn(true);
+      saveGlobalLock({ on: true, pts: globalLockPts });
     }
   }
+
+  // Account defaults — Quantity/Product Type/Trading Mode/default Lock Points/
+  // SL/Target for future auto-trade entries. DB-backed via /api/settings so
+  // they survive refresh/restart/other devices; falls back to today's
+  // hardcoded backend constants if the fetch fails.
+  const [accountDefaults, setAccountDefaults] = useState<AccountDefaults | null>(null);
+  const [defaultsError,   setDefaultsError]   = useState("");
+  const [defLockInput,    setDefLockInput]    = useState("");
+  const [defSlInput,      setDefSlInput]      = useState("");
+  const [defTargetInput,  setDefTargetInput]  = useState("");
+
+  useEffect(() => {
+    settingsApi.get()
+      .then(s => {
+        setAccountDefaults(s.accountDefaults);
+        setDefLockInput(s.accountDefaults.lockPoints != null ? String(s.accountDefaults.lockPoints) : "");
+        setDefSlInput(s.accountDefaults.stopLoss   != null ? String(s.accountDefaults.stopLoss)   : "");
+        setDefTargetInput(s.accountDefaults.target != null ? String(s.accountDefaults.target)     : "");
+      })
+      .catch(() => setAccountDefaults({
+        lockPoints: null, stopLoss: null, target: null,
+        quantity: 10, productType: "MIS", tradingMode: "LIVE",
+      }));
+  }, []);
+
+  async function updateAccountDefaults(patch: Partial<AccountDefaults>) {
+    const prev = accountDefaults;
+    setAccountDefaults(d => (d ? { ...d, ...patch } : d));
+    try {
+      const updated = await settingsApi.updateAccountDefaults(patch);
+      setAccountDefaults(updated.accountDefaults);
+      setDefaultsError("");
+    } catch (e: any) {
+      setAccountDefaults(prev);
+      setDefaultsError(`Failed to save — ${e.message}`);
+    }
+  }
+
+  function saveDefLock()   { const v = defLockInput === "" ? null : parseFloat(defLockInput);   if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ lockPoints: v }); }
+  function saveDefSl()     { const v = defSlInput   === "" ? null : parseFloat(defSlInput);     if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ stopLoss:   v }); }
+  function saveDefTarget() { const v = defTargetInput === "" ? null : parseFloat(defTargetInput); if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ target:    v }); }
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -764,7 +919,11 @@ export function AccountTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  // ── 500ms wallet / charges / P&L polling ──────────────────────────────────
+  // ── Wallet / charges / P&L polling — charges come from Kite's own charge
+  // engine (getvirtualContractNote), one of its slower endpoints, so this
+  // runs far less often than the lightweight live-positions poll below.
+  // Hitting it every 500ms was needlessly loading Kite's API and could stall
+  // faster, unrelated calls (like a manual exit) behind it.
   useEffect(() => {
     let active  = true;
     let running = false;
@@ -777,7 +936,7 @@ export function AccountTab() {
       } catch {}
       finally { running = false; }
     };
-    const id = setInterval(poll, 500);
+    const id = setInterval(poll, 5000);
     return () => { active = false; clearInterval(id); };
   }, []);
 
@@ -1292,6 +1451,76 @@ export function AccountTab() {
             )}
           </div>
 
+          {/* ── Auto-trade account defaults (persisted to DB) ── */}
+          <div className="flex flex-col gap-2 mb-3 px-3 py-3 rounded-xl"
+            style={{ background: isDark ? "#0f172a" : "#f8f8ff", border: `1px solid ${isDark ? "#1e293b" : "#e2e8f0"}` }}>
+            <span className="text-[9px] font-bold uppercase tracking-[1px]" style={{ ...MONO, color: subtext }}>
+              ⚙ Auto-Trade Defaults
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px]" style={{ color: subtext }}>Qty</span>
+              <select
+                value={accountDefaults?.quantity ?? 10}
+                onChange={e => updateAccountDefaults({ quantity: Number(e.target.value) as 5 | 10 | 15 | 20 })}
+                className="rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }}>
+                {[5, 10, 15, 20].map(q => <option key={q} value={q}>{q} lot{q > 1 ? "s" : ""}</option>)}
+              </select>
+
+              <span className="text-[10px]" style={{ color: subtext }}>Product</span>
+              <select
+                value={accountDefaults?.productType ?? "MIS"}
+                onChange={e => updateAccountDefaults({ productType: e.target.value as "MIS" | "NRML" })}
+                className="rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }}>
+                <option value="MIS">MIS</option>
+                <option value="NRML">NRML</option>
+              </select>
+
+              <span className="text-[10px]" style={{ color: subtext }}>Mode</span>
+              <select
+                value={accountDefaults?.tradingMode ?? "LIVE"}
+                onChange={e => updateAccountDefaults({ tradingMode: e.target.value as "LIVE" | "PAPER" })}
+                className="rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#1e293b" : "#fff",
+                         color: accountDefaults?.tradingMode === "PAPER" ? "#f59e0b" : text,
+                         border: `1px solid ${accountDefaults?.tradingMode === "PAPER" ? "#f59e0b" : border}`, ...MONO }}>
+                <option value="LIVE">LIVE</option>
+                <option value="PAPER">PAPER</option>
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px]" style={{ color: subtext }}>Lock Pts</span>
+              <input type="number" min="1" value={defLockInput} onChange={e => setDefLockInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveDefLock()} placeholder="off"
+                className="w-16 rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }} />
+              <button onClick={saveDefLock} className="px-2 py-1 rounded-lg text-[10px] font-bold text-white"
+                style={{ background: "#6366f1" }}>Set</button>
+
+              <span className="text-[10px]" style={{ color: subtext }}>SL pts</span>
+              <input type="number" min="1" value={defSlInput} onChange={e => setDefSlInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveDefSl()} placeholder="off"
+                className="w-16 rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }} />
+              <button onClick={saveDefSl} className="px-2 py-1 rounded-lg text-[10px] font-bold text-white"
+                style={{ background: "#e11d48" }}>Set</button>
+
+              <span className="text-[10px]" style={{ color: subtext }}>Target pts</span>
+              <input type="number" min="1" value={defTargetInput} onChange={e => setDefTargetInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveDefTarget()} placeholder="off"
+                className="w-16 rounded-lg px-2 py-1 text-[11px] font-bold outline-none"
+                style={{ background: isDark ? "#1e293b" : "#fff", color: text, border: `1px solid ${border}`, ...MONO }} />
+              <button onClick={saveDefTarget} className="px-2 py-1 rounded-lg text-[10px] font-bold text-white"
+                style={{ background: "#16a34a" }}>Set</button>
+            </div>
+
+            {defaultsError && (
+              <span className="text-[9px]" style={{ color: "#e11d48" }}>{defaultsError}</span>
+            )}
+          </div>
+
           {exitError && (
             <div className="mb-3 px-3 py-2 rounded-lg text-[10px]"
               style={{ background: "#e11d4815", border: "1px solid #e11d4840", ...MONO, color: "#e11d48" }}>
@@ -1307,13 +1536,14 @@ export function AccountTab() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-5">
-              {displayPositions.map((p, i) => (
+              {displayPositions.map((p) => (
                 <PositionCard
-                  key={i}
+                  key={p.tradingsymbol}
                   p={p}
                   onExit={p.status === "OPEN" ? () => handleExit(p.tradingsymbol, p.quantity) : undefined}
                   isExiting={exitingSet.has(p.tradingsymbol)}
                   defaultLockPts={globalLockOn ? globalLockPts : null}
+                  accountDefaults={accountDefaults}
                 />
               ))}
             </div>

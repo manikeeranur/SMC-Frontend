@@ -189,6 +189,32 @@ export const accountApi = {
   }>("/api/account"),
 };
 
+export type AccountDefaults = {
+  lockPoints:  number | null;
+  stopLoss:    number | null;
+  target:      number | null;
+  quantity:    5 | 10 | 15 | 20;
+  productType: "MIS" | "NRML";
+  tradingMode: "LIVE" | "PAPER";
+};
+
+export type SettingsDoc = {
+  key: string;
+  smcAutoTradeEnabled: boolean;
+  vwap930AutoTradeEnabled: boolean;
+  accountDefaults: AccountDefaults;
+  updatedAt: string;
+};
+
+export const settingsApi = {
+  get: () => req<SettingsDoc>("/api/settings"),
+  updateAccountDefaults: (patch: Partial<AccountDefaults>) =>
+    req<SettingsDoc>("/api/settings/account-defaults", {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+};
+
 export const watchlistApi = {
   get: () => req<any[]>("/api/watchlist"),
   add: (leg: any) =>

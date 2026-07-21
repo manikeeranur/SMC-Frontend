@@ -517,44 +517,44 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
                boxShadow: isDark ? "none" : "0 2px 10px rgba(0,0,0,0.06)" }}>
 
       {/* ── Header ── */}
-      <div className="flex items-start gap-3 px-4 pt-4 pb-3">
+      <div className="flex items-center gap-3 px-4 pt-4 pb-3">
         <IndexLogo symbol={p.tradingsymbol} optType={optType} />
         <div className="flex-1 min-w-0">
           {/* Name row */}
           <div className="flex items-start justify-between gap-2">
-            <span className="text-[14px] font-bold leading-snug flex-1 min-w-0" style={{ color: text }}>
+            <span className="text-[12px] font-bold leading-snug flex-1 min-w-0" style={{ color: text }}>
               {displayName}
             </span>
             {/* QTY — top right */}
             {isOpen ? (
-              <span className="flex items-center gap-1 text-[11px] font-semibold flex-shrink-0 mt-0.5"
+              <span className="flex items-center gap-1 text-[10px] font-semibold flex-shrink-0"
                 style={{ color: isDark ? "#64748b" : "#6b7a90" }}>
-                <span style={{ fontSize: 13 }}>🧳</span>
+                <span style={{ fontSize: 12 }}>🧳</span>
                 {p.quantity} QTY
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-[11px] font-bold flex-shrink-0 mt-0.5 px-1.5 py-0.5 rounded"
+              <span className="flex items-center gap-1 text-[10px] font-bold flex-shrink-0 px-1.5 py-0.5 rounded"
                 style={{ color: "#16a34a", background: "#16a34a15" }}>
-                <span style={{ fontSize: 11 }}>✓</span>
+                <span style={{ fontSize: 10 }}>✓</span>
                 {p.quantity} QTY Traded
               </span>
             )}
           </div>
           {/* Price + % */}
-          <div className="flex items-center gap-1.5 mt-0.5">
-            <span className="text-[12px]" style={{ color: subtext }}>Price:</span>
-            <span className="text-[13px] font-bold" style={{ color: text }}>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px]" style={{ color: subtext }}>Price:</span>
+            <span className="text-[12px] font-bold" style={{ color: text }}>
               ₹{fmt(p.currentPrice || p.buyPrice)}
             </span>
             {p.buyPrice > 0 && (
-              <span className="text-[12px] font-bold flex items-center gap-0.5"
+              <span className="text-[10px] font-bold flex items-center gap-0.5"
                 style={{ color: pctUp ? "#16a34a" : "#e11d48" }}>
                 {pctUp ? "▲" : "▼"} {Math.abs(pricePct).toFixed(2)}%
               </span>
             )}
-            <div className="text-[10px] font-semibold ms-auto" style={{ ...MONO, color: pnlColor }}>
+            <div className="text-[10px] font-semibold ms-auto mt-0.5" style={{ ...MONO, color: pnlColor }}>
             {movePts >= 0 ? "+" : ""}{fmt(movePts)} × {p.quantity}
-            </div>       
+            </div>
           </div>
         </div>
       </div>
@@ -570,7 +570,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
         <span className="text-[10px] font-bold" style={{ ...MONO, color: isOpen ? "#16a34a" : text }}>
           {isOpen ? "Live" : fmtClock(p.exitTime)}
         </span>
-        <span className="ml-auto text-[9.5px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0"
+        <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0"
           style={{ ...MONO, background: isDark ? "#1e293b" : "#f1f5f9", color: subtext }}>
           {fmtDuration(p.durationSecs)}
         </span>
@@ -579,18 +579,18 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
       {/* ── Stats row: Entry Price | Exit Price | Gain/Loss ── */}
       <div className="grid grid-cols-3 px-4 pt-2 pb-3 gap-2">
         <div>
-          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Entry Price</div>
-          <div className="text-[14px] font-bold" style={{ color: text }}>₹{fmt(p.buyPrice)}</div>
+          <div className="text-[10px] mb-0.5" style={{ color: subtext }}>Entry Price</div>
+          <div className="text-[12px] font-bold" style={{ color: text }}>₹{fmt(p.buyPrice)}</div>
         </div>
         <div>
-          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Exit Price</div>
-          <div className="text-[14px] font-bold" style={{ color: text }}>
+          <div className="text-[10px] mb-0.5" style={{ color: subtext }}>Exit Price</div>
+          <div className="text-[12px] font-bold" style={{ color: text }}>
             {p.sellPrice > 0 ? `₹${fmt(p.sellPrice)}` : "—"}
           </div>
         </div>
         <div className="text-end">
-          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Gain/Loss</div>
-          <div className="text-[14px] font-bold" style={{ color: pnlColor }}>
+          <div className="text-[10px] mb-0.5" style={{ color: subtext }}>Gain/Loss</div>
+          <div className="text-[12px] font-bold" style={{ color: pnlColor }}>
             {pnlVal >= 0 ? "+" : ""}₹{fmt(pnlVal)}
           </div>
         </div>
@@ -610,7 +610,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
             onChange={e => setLockInput(e.target.value)}
             onKeyDown={e => e.key === "Enter" && applyLockPoints()}
             placeholder="e.g. 10"
-            className="flex-1 rounded-lg px-2 py-1 text-[11px] font-bold outline-none min-w-0"
+            className="flex-1 rounded-lg px-2 py-1 text-[10px] font-bold outline-none min-w-0"
             style={{ background: isDark ? "#0f172a" : "#fff", color: text,
                      border: `1px solid #6366f140`, ...MONO }}
           />
@@ -633,13 +633,13 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
       {(slSet !== null || tpSet !== null || lockTarget !== null) && (
         <div className="flex items-center gap-2 px-3 pb-3 flex-wrap">
           {/* monitoring badge */}
-          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold"
+          <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold"
             style={{ background: "#f59e0b18", color: "#f59e0b" }}>
             <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: "#f59e0b" }} />
             MONITORING
           </span>
           {slSet !== null && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold"
               style={{ background: "#e11d4815", color: "#e11d48" }}>
               SL ₹{fmt(slSet)}
               <button onClick={() => { setSlSet(null); saveSLTP(p.tradingsymbol, { sl: null }); triggeredRef.current = false; }}
@@ -647,7 +647,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
             </span>
           )}
           {tpSet !== null && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold"
               style={{ background: "#16a34a15", color: "#16a34a" }}>
               TP ₹{fmt(tpSet)}
               <button onClick={() => { setTpSet(null); saveSLTP(p.tradingsymbol, { tp: null }); triggeredRef.current = false; }}
@@ -655,14 +655,14 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
             </span>
           )}
           {lockTarget !== null && (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-bold"
+            <span className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold"
               style={{ background: "#6366f115", color: "#6366f1" }}>
               🔒 +{lockSet}pts → ₹{fmt(lockTarget)}
               <button onClick={() => { setLockSet(null); setLockDir(null); setLockInput(""); saveSLTP(p.tradingsymbol, { lockPts: null, lockDir: null }); triggeredRef.current = false; }}
                 className="ml-0.5 opacity-60 hover:opacity-100">×</button>
             </span>
           )}
-          <button onClick={() => setShowSLTP(true)} className="ml-auto text-[9px] font-bold underline"
+          <button onClick={() => setShowSLTP(true)} className="ml-auto text-[10px] font-bold underline"
             style={{ color: subtext }}>edit</button>
         </div>
       )}
@@ -673,18 +673,18 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
           style={{ background: isDark ? "#1e293b" : "#f8fafc", border: `1px solid ${border}` }}>
           <div className="flex gap-2">
             <div className="flex-1">
-              <div className="text-[8px] font-bold mb-1" style={{ color: subtext }}>Stop Loss ₹</div>
+              <div className="text-[10px] font-bold mb-1" style={{ color: subtext }}>Stop Loss ₹</div>
               <input type="number" value={slInput} onChange={e => setSlInput(e.target.value)}
                 placeholder={p.buyPrice > 0 ? fmt(p.buyPrice * 0.88) : "0.00"}
-                className="w-full rounded-lg px-2 py-1.5 text-[11px] font-bold outline-none"
+                className="w-full rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none"
                 style={{ background: isDark ? "#0f172a" : "#fff", color: text,
                          border: `1px solid ${border}`, ...MONO }} />
             </div>
             <div className="flex-1">
-              <div className="text-[8px] font-bold mb-1" style={{ color: subtext }}>Target ₹</div>
+              <div className="text-[10px] font-bold mb-1" style={{ color: subtext }}>Target ₹</div>
               <input type="number" value={tpInput} onChange={e => setTpInput(e.target.value)}
                 placeholder={p.buyPrice > 0 ? fmt(p.buyPrice * 1.24) : "0.00"}
-                className="w-full rounded-lg px-2 py-1.5 text-[11px] font-bold outline-none"
+                className="w-full rounded-lg px-2 py-1.5 text-[10px] font-bold outline-none"
                 style={{ background: isDark ? "#0f172a" : "#fff", color: text,
                          border: `1px solid ${border}`, ...MONO }} />
             </div>
@@ -704,7 +704,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
       {isOpen && (
         <div className="grid grid-cols-2 border-t" style={{ borderColor: border }}>
           <button onClick={onExit} disabled={isExiting}
-            className="flex items-center justify-center gap-2 py-3.5 text-[13px] font-semibold border-r disabled:opacity-50"
+            className="flex items-center justify-center gap-2 py-3.5 text-[12px] font-semibold border-r disabled:opacity-50"
             style={{ color: "#1d6ff5", borderColor: border,
                      background: isDark ? "#0a1628" : "#ebf3ff" }}>
             {isExiting
@@ -713,7 +713,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
             {isExiting ? "Exiting…" : "Instant Exit"}
           </button>
           <button onClick={() => setShowSLTP(v => !v)}
-            className="flex items-center justify-center gap-2 py-3.5 text-[13px] font-semibold"
+            className="flex items-center justify-center gap-2 py-3.5 text-[12px] font-semibold"
             style={{ color: "#16a34a", background: isDark ? "#071a0e" : "#ecfdf5" }}>
             <IconPercentage size={15} />
             {slSet || tpSet ? "Edit SL/Target" : "Add SL/Target"}

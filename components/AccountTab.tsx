@@ -34,7 +34,6 @@ function saveSLTP(tradingsymbol: string, patch: Partial<SLTPStore>) {
   } catch {}
 }
 
-
 type AccountData = Awaited<ReturnType<typeof accountApi.get>>;
 type Position    = AccountData["positions"][number];
 
@@ -293,6 +292,12 @@ function ToastStack({ toasts }: { toasts: ToastItem[] }) {
   );
 }
 
+// ─── Uppercase the am/pm in backend-formatted times ("10:15:32 am" → "10:15:32 AM")
+function fmtClock(t: string | null): string {
+  if (!t) return "—";
+  return t.replace(/\s?(am|pm)$/i, m => m.toUpperCase());
+}
+
 // ─── Format duration from seconds ────────────────────────────────────────────
 function fmtDuration(secs: number | null): string {
   if (secs === null || secs < 0) return "—";
@@ -365,7 +370,6 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
   const subtext = isDark ? "#94a3b8" : "#8a9bb0";
   const text    = isDark ? "#e2e8f0" : "#1a2332";
   const cardBg  = isDark ? "#0f172a" : "#ffffff";
-  const gridBg  = isDark ? "#0b1322" : "#f5f7fa";
 
   const isOpen   = p.status === "OPEN";
   const optType  = (p.direction === "CE" ? "CE" : "PE") as "CE" | "PE";
@@ -375,34 +379,7 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
   const pricePct = p.buyPrice > 0 ? ((p.currentPrice - p.buyPrice) / p.buyPrice * 100) : 0;
   const pctUp    = pricePct >= 0;
 
-  // Days to expiry
-  function daysLeft(): number | null {
-    try {
-      const sym  = p.tradingsymbol;
-      const type = sym.slice(-2);
-      const base = sym.slice(0, -2);
-      const MON: Record<string,number> = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
-      // monthly
-      const mo = base.match(/^[A-Z]+(\d{2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d+)$/);
-      if (mo) {
-        const yr   = 2000 + parseInt(mo[1]);
-        const mnth = MON[mo[2]];
-        // last Thursday/Friday of month ~ day 28
-        const exp  = new Date(yr, mnth, 28);
-        return Math.max(0, Math.ceil((exp.getTime() - Date.now()) / 86400000));
-      }
-      // weekly
-      const wk = base.match(/^[A-Z]+\d{2}[1-9ABC](\d{2})(\d+)$/);
-      if (wk) {
-        // approximate from symbol chars — just show duration instead
-        return null;
-      }
-    } catch {}
-    return null;
-  }
-
   // SL/TP state — hydrated from localStorage (once, on mount) so it survives a page refresh
-  const [showDetail, setShowDetail] = useState(false);
   const [showSLTP,   setShowSLTP]   = useState(false);
   const [slInput,    setSlInput]    = useState(() => { const v = loadSLTP(p.tradingsymbol).sl; return v != null ? String(v) : ""; });
   const [tpInput,    setTpInput]    = useState(() => { const v = loadSLTP(p.tradingsymbol).tp; return v != null ? String(v) : ""; });
@@ -438,8 +415,10 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
     }
   }
 
+  // Per-unit points move — Gain/Loss (₹) is always this × quantity.
+  const movePts = +((isOpen ? p.currentPrice : p.sellPrice) - p.buyPrice).toFixed(2);
+
   const displayName  = formatSymbol(p.tradingsymbol);
-  const days         = daysLeft();
   const triggeredRef = useRef(false);
   const onExitRef    = useRef(onExit);
   useEffect(() => { onExitRef.current = onExit; }, [onExit]);
@@ -532,20 +511,6 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultLockPts]);
 
-  // 2 × 3 detail grid rows
-  const gridRows = [
-    [
-      { label: "CMP",         value: p.currentPrice > 0 ? `₹${fmt(p.currentPrice)}` : "—" },
-      { label: "Entry Price", value: p.buyPrice > 0     ? `₹${fmt(p.buyPrice)}`     : "—", showCheck: !isOpen && p.buyPrice > 0 },
-      { label: "Exit Price",  value: p.sellPrice > 0    ? `₹${fmt(p.sellPrice)}`    : "—", showCheck: !isOpen && p.sellPrice > 0 },
-    ],
-    [
-      { label: "Entry Time", value: p.entryTime ?? "—"           },
-      { label: "Exit Time",  value: p.exitTime  ?? "—"           },
-      { label: "Duration",   value: fmtDuration(p.durationSecs)  },
-    ],
-  ];
-
   return (
     <div className="rounded-2xl overflow-hidden flex flex-col"
       style={{ background: cardBg, border: `1px solid ${border}`,
@@ -587,6 +552,9 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
                 {pctUp ? "▲" : "▼"} {Math.abs(pricePct).toFixed(2)}%
               </span>
             )}
+            <div className="text-[10px] font-semibold ms-auto" style={{ ...MONO, color: pnlColor }}>
+            {movePts >= 0 ? "+" : ""}{fmt(movePts)} × {p.quantity}
+            </div>       
           </div>
         </div>
       </div>
@@ -594,21 +562,35 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
       {/* ── Divider ── */}
       <div style={{ height: 1, background: border, marginBottom: 2 }} />
 
-      {/* ── Stats row: Avg Price | Days to expiry | Gain/Loss ── */}
-      <div className="grid grid-cols-3 px-4 py-3 gap-2">
+      {/* ── Entry → Exit timeline (exact time, with seconds) ── */}
+      <div className="flex items-center gap-1.5 px-4 pt-3 pb-1 flex-wrap">
+        <IconClock size={12} style={{ color: subtext, flexShrink: 0 }} />
+        <span className="text-[10px] font-bold" style={{ ...MONO, color: text }}>{fmtClock(p.entryTime)}</span>
+        <span style={{ color: subtext }}>→</span>
+        <span className="text-[10px] font-bold" style={{ ...MONO, color: isOpen ? "#16a34a" : text }}>
+          {isOpen ? "Live" : fmtClock(p.exitTime)}
+        </span>
+        <span className="ml-auto text-[9.5px] font-bold px-1.5 py-0.5 rounded-md flex-shrink-0"
+          style={{ ...MONO, background: isDark ? "#1e293b" : "#f1f5f9", color: subtext }}>
+          {fmtDuration(p.durationSecs)}
+        </span>
+      </div>
+
+      {/* ── Stats row: Entry Price | Exit Price | Gain/Loss ── */}
+      <div className="grid grid-cols-3 px-4 pt-2 pb-3 gap-2">
         <div>
-          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Avg. Price</div>
-          <div className="text-[15px] font-bold" style={{ color: text }}>₹{fmt(p.buyPrice)}</div>
+          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Entry Price</div>
+          <div className="text-[14px] font-bold" style={{ color: text }}>₹{fmt(p.buyPrice)}</div>
         </div>
         <div>
-          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Days to expiry</div>
-          <div className="text-[15px] font-bold" style={{ color: text }}>
-            {days !== null ? days : (p.durationSecs !== null ? fmtDuration(p.durationSecs) : "—")}
+          <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Exit Price</div>
+          <div className="text-[14px] font-bold" style={{ color: text }}>
+            {p.sellPrice > 0 ? `₹${fmt(p.sellPrice)}` : "—"}
           </div>
         </div>
-        <div>
+        <div className="text-end">
           <div className="text-[11px] mb-0.5" style={{ color: subtext }}>Gain/Loss</div>
-          <div className="text-[15px] font-bold" style={{ color: pnlColor }}>
+          <div className="text-[14px] font-bold" style={{ color: pnlColor }}>
             {pnlVal >= 0 ? "+" : ""}₹{fmt(pnlVal)}
           </div>
         </div>
@@ -644,46 +626,6 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
             style={{ background: "#6366f1" }}>
             Set
           </button>
-        </div>
-      )}
-
-      {/* ── More details chevron toggle ── */}
-      <button
-        onClick={() => setShowDetail(v => !v)}
-        className="flex items-center justify-center gap-1 py-1.5 w-full text-[10px] font-semibold border-t transition-colors"
-        style={{ borderColor: border, color: subtext,
-                 background: isDark ? "#0a1220" : "#f8fafc" }}>
-        {showDetail ? "Less details" : "More details"}
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
-          style={{ transition: "transform 0.2s", transform: showDetail ? "rotate(180deg)" : "rotate(0deg)" }}>
-          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-        </svg>
-      </button>
-
-      {/* ── 2 × 3 detail grid (collapsible) ── */}
-      {showDetail && (
-        <div className="mx-3 mb-3 mt-1 rounded-xl overflow-hidden border" style={{ borderColor: border }}>
-          {gridRows.map((row, ri) => (
-            <div key={ri}
-              className={`grid grid-cols-3 ${ri < gridRows.length - 1 ? "border-b" : ""}`}
-              style={{ borderColor: border, background: ri % 2 === 0 ? gridBg : cardBg }}>
-              {row.map((cell, ci) => (
-                <div key={cell.label}
-                  className={`flex flex-col px-3 py-2 ${ci < row.length - 1 ? "border-r" : ""}`}
-                  style={{ borderColor: border }}>
-                  <span className="text-[8px] font-bold uppercase tracking-[0.7px] mb-0.5"
-                    style={{ ...MONO, color: subtext }}>{cell.label}</span>
-                  <span className="text-[11px] font-bold leading-tight"
-                    style={{ ...MONO, color: text }}>{cell.value}</span>
-                  {"showCheck" in cell && cell.showCheck && (
-                    <span className="flex items-center gap-0.5 text-[8px] font-bold mt-0.5" style={{ color: "#16a34a" }}>
-                      ✓ Traded
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          ))}
         </div>
       )}
 

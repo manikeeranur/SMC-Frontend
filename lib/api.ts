@@ -189,6 +189,10 @@ export const accountApi = {
   }>("/api/account"),
 };
 
+export const holidaysApi = {
+  list: () => req<{ holidays: { date: string; name: string }[]; stale?: boolean }>("/api/holidays"),
+};
+
 export type AccountDefaults = {
   lockPoints:  number | null;
   stopLoss:    number | null;

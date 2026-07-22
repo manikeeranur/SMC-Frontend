@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/lib/theme";
-import { LOT_SIZE, NUM_LOTS, MARKET_HOLIDAYS_MAP } from "@/lib/constants";
+import { LOT_SIZE, NUM_LOTS } from "@/lib/constants";
+import { useHolidaysMap } from "@/lib/holidays";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
 
@@ -104,6 +105,7 @@ export function ResultsContent() {
   const { theme } = useTheme();
   const isDark = theme === "dark";
 
+  const holidaysMap = useHolidaysMap();
   const [tab, setTab]           = useState<"backtest" | "live">("live");
   const [strategy, setStrategy] = useState<"smc" | "vwap930">("smc");
   const [dates, setDates]       = useState<{ backtest: string[]; live: string[] }>({ backtest: [], live: [] });
@@ -331,7 +333,7 @@ export function ResultsContent() {
               const lotPnl  = data ? data.totalPnL * LOT_QTY : null;
               const hasData = !!data;
               const isToday   = dateStr === new Date().toISOString().slice(0, 10);
-              const holiday   = MARKET_HOLIDAYS_MAP[dateStr];
+              const holiday   = holidaysMap[dateStr];
               const isHoliday = !!holiday && !hasData;
               const profitBg  = "rgba(22, 163, 74, 0.1)";
               const lossBg    = "rgba(225, 29, 72, 0.1)";

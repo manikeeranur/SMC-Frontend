@@ -42,7 +42,9 @@ import {
   AuthError,
 } from "@/lib/api";
 
-import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, VWAP930_MIN_PREMIUM, VWAP930_MAX_PREMIUM, VWAP930_SL_PCT, VWAP930_TARGET_PCT, VWAP930_NUM_LOTS, VWAP930_ENTRY_TIME, MARKET_HOLIDAYS, MARKET_HOLIDAYS_MAP } from "@/lib/constants";
+import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, VWAP930_MIN_PREMIUM, VWAP930_MAX_PREMIUM, VWAP930_SL_PCT, VWAP930_TARGET_PCT, VWAP930_NUM_LOTS, VWAP930_ENTRY_TIME } from "@/lib/constants";
+import { useHolidays } from "@/lib/holidays";
+import HolidaysTab from "@/components/HolidaysTab";
 import { ThemeToggle, useTheme } from "@/lib/theme";
 import {
   Select,
@@ -76,6 +78,7 @@ import {
   IconCheck,
   IconTrash,
   IconNotebook,
+  IconCalendarEvent,
 } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
@@ -124,8 +127,9 @@ function OptionsPageInner() {
   const [live, setLive] = useState(true);
 
   const [activeTab, setActiveTab] = useState<
-    "chain" | "smc" | "vwap930" | "watchlist" | "ohlc" | "results" | "account" | "journal"
+    "chain" | "smc" | "vwap930" | "watchlist" | "ohlc" | "results" | "account" | "journal" | "holidays"
   >("chain");
+  const marketHolidays = useHolidays();
   type WlistGroup = { id: string; name: string; items: WatchedOption[] };
   const [wlistGroups, setWlistGroups] = useState<WlistGroup[]>([{ id: "wl_default", name: "My Watchlist", items: [] }]);
   const [activeWlId, setActiveWlId] = useState("wl_default");
@@ -292,7 +296,9 @@ function OptionsPageInner() {
       | "watchlist"
       | "ohlc"
       | "results"
+      | "account"
       | "journal"
+      | "holidays"
       | null;
     if (savedTab) setActiveTab(savedTab);
     setHydrated(true);
@@ -324,15 +330,20 @@ function OptionsPageInner() {
 
   const tickRef = useRef<ReturnType<typeof setInterval>>();
   const wsRef   = useRef<WebSocket | null>(null);
-  const [wsConnected,     setWsConnected]     = useState(false);
   const [hasOpenPosition, setHasOpenPosition] = useState(false);
 
-  // Browser-tab indicator: green while a scanner is actively running or a
-  // position is open; red once scanning has stopped AND the live tick feed
-  // is also down (nothing is being monitored); otherwise the plain default.
-  const scanRunning = !!(smcStatus?.scanActive || vwapStatus?.scanActive);
-  const tabIndicatorColor: "green" | "red" | null =
-    (!scanRunning && !wsConnected) ? "red" : (scanRunning || hasOpenPosition) ? "green" : null;
+  // Browser-tab indicator: green only when something real is happening —
+  // SMC or VWAP930 actually ran a scan recently (lastScanAt within the cron
+  // interval, not just "market is open" — scanActive is a pure clock check
+  // and is true all afternoon even with zero alerts), or a position is open.
+  // Otherwise red. Always one or the other, never hidden.
+  const SCAN_RECENCY_MS = 90_000; // SMC cron runs every 60s; VWAP930 once at 9:30
+  const smcRecentlyScanned = !!(smcStatus?.lastScanAt
+    && Date.now() - new Date(smcStatus.lastScanAt).getTime() < SCAN_RECENCY_MS);
+  const vwapRecentlyScanned = !!(vwapStatus?.lastScanAt
+    && Date.now() - new Date(vwapStatus.lastScanAt).getTime() < SCAN_RECENCY_MS);
+  const tabIndicatorColor: "green" | "red" =
+    (smcRecentlyScanned || vwapRecentlyScanned || hasOpenPosition) ? "green" : "red";
   useTabIndicator(tabIndicatorColor);
   // 1-min candle closes per option token → for RSI(14) on watchlist
   const priceHistRef = useRef<
@@ -444,14 +455,7 @@ function OptionsPageInner() {
     });
 
     wsRef.current = ws;
-    if (ws) {
-      ws.addEventListener("open",  () => setWsConnected(true));
-      ws.addEventListener("close", () => setWsConnected(false));
-      ws.addEventListener("error", () => setWsConnected(false));
-    } else {
-      setWsConnected(false);
-    }
-    return () => { ws?.close(); wsRef.current = null; setWsConnected(false); };
+    return () => { ws?.close(); wsRef.current = null; };
   }, [authenticated]);
 
   // ── Refresh option chain ────────────────────────────────────────────────────
@@ -1512,7 +1516,7 @@ function OptionsPageInner() {
               "DEC",
             ][+mm];
             const isWeekend = dayIdx === 0 || dayIdx === 6;
-            const holiday = MARKET_HOLIDAYS.find(
+            const holiday = marketHolidays.find(
               (h) => h.date === todayStr,
             );
             const status = holiday
@@ -1599,6 +1603,11 @@ function OptionsPageInner() {
                 tab: "journal",
                 icon: <IconNotebook size={20} />,
                 label: "Journal",
+              },
+              {
+                tab: "holidays",
+                icon: <IconCalendarEvent size={20} />,
+                label: "Holidays",
               },
             ] as const
           ).map(({ tab, icon, label, badge }: any) => (
@@ -2637,6 +2646,9 @@ function OptionsPageInner() {
 
           {/* ── JOURNAL ── */}
           {activeTab === "journal" && <TradingJournalContent />}
+
+          {/* ── HOLIDAYS ── */}
+          {activeTab === "holidays" && <HolidaysTab />}
         </div>
       </div>
 
@@ -2754,6 +2766,16 @@ function OptionsPageInner() {
           <IconNotebook size={22} />
           <span className="text-[8px]" style={MONO}>
             Journal
+          </span>
+        </button>
+        <button
+          onClick={() => { setActiveTab("holidays"); setChartTarget(null); }}
+          className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
+          style={{ color: activeTab === "holidays" ? "#ea580c" : "#94a3b8" }}
+        >
+          <IconCalendarEvent size={22} />
+          <span className="text-[8px]" style={MONO}>
+            Holidays
           </span>
         </button>
       </nav>
@@ -2962,7 +2984,7 @@ function OptionsPageInner() {
                 style={{ ...MONO, background: "#ea580c15", color: "#ea580c" }}
               >
                 {
-                  MARKET_HOLIDAYS.filter(
+                  marketHolidays.filter(
                     (h) => h.date >= new Date().toISOString().split("T")[0],
                   ).length
                 }{" "}
@@ -2985,7 +3007,7 @@ function OptionsPageInner() {
               className="overflow-y-auto px-3 pb-3"
               style={{ maxHeight: "240px", scrollbarWidth: "none" }}
             >
-              {MARKET_HOLIDAYS.map((h) => {
+              {marketHolidays.map((h) => {
                 const today = new Date().toISOString().split("T")[0];
                 const isPast = h.date < today;
                 const day = holidayDayName(h.date);

@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme";
-import { LOT_SIZE, NUM_LOTS, MARKET_HOLIDAYS_MAP } from "@/lib/constants";
+import { LOT_SIZE, NUM_LOTS } from "@/lib/constants";
+import { useHolidaysMap } from "@/lib/holidays";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 
 const API    = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
@@ -164,6 +165,7 @@ function CalHeatmap({ year, month, summaryMap, isDark, border, color, muted }: {
   isDark: boolean; border: string; color: string; muted: string;
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
+  const holidaysMap = useHolidaysMap();
   const cells = buildCalendar(year, month);
 
   const maxAbs = Math.max(
@@ -198,7 +200,7 @@ function CalHeatmap({ year, month, summaryMap, isDark, border, color, muted }: {
           const data    = summaryMap[ds];
           const lot     = data ? data.totalPnL * LOT_QTY : null;
           const isToday = ds === new Date().toISOString().slice(0, 10);
-          const holiday = MARKET_HOLIDAYS_MAP[ds];
+          const holiday = holidaysMap[ds];
           const isHol   = !!holiday && !data;
           const isHov   = hovered === day;
 
@@ -269,7 +271,7 @@ function CalHeatmap({ year, month, summaryMap, isDark, border, color, muted }: {
             </div>
           ) : (
             <span className="text-[8px]" style={{ ...MONO, color: muted }}>
-              {MARKET_HOLIDAYS_MAP[hovDs] ? `Holiday: ${MARKET_HOLIDAYS_MAP[hovDs]}` : "No trades this day"}
+              {holidaysMap[hovDs] ? `Holiday: ${holidaysMap[hovDs]}` : "No trades this day"}
             </span>
           )
         ) : (
@@ -1156,6 +1158,7 @@ export function TradingJournalContent() {
 
   const [viewType, setViewType] = useState<ViewType>("month");
   const [strategy, setStrategy] = useState<"smc" | "vwap930">("smc");
+  const holidaysMap = useHolidaysMap();
   const [summary, setSummary]   = useState<DaySummary[]>([]);
   const [summaryMap, setSummaryMap] = useState<Record<string, DaySummary>>({});
   const [calMonth, setCalMonth] = useState(() => {
@@ -1369,7 +1372,7 @@ export function TradingJournalContent() {
                   const lotPnl    = data ? data.totalPnL * LOT_QTY : null;
                   const hasData   = !!data;
                   const isToday   = dateStr === new Date().toISOString().slice(0, 10);
-                  const holiday   = MARKET_HOLIDAYS_MAP[dateStr];
+                  const holiday   = holidaysMap[dateStr];
                   const isHoliday = !!holiday && !hasData;
                   const cellBg = hasData ? (lotPnl! >= 0 ? "rgba(22,163,74,0.10)" : "rgba(225,29,72,0.10)")
                     : isHoliday ? "rgba(251,191,36,0.35)" : "rgba(100,116,139,0.07)";

@@ -1085,6 +1085,20 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
     onOpenPositionChange?.(hasOpenPosition);
   }, [hasOpenPosition, onOpenPositionChange]);
 
+  // ── Live Overall P&L in the browser tab title — mirrors the Overall P&L
+  // card's exact "Net (after charges)" formula (data.pnl.unrealised −
+  // data.charges.total) so the tab always matches what's on screen. Updates
+  // every 5s along with the account poll. Reverts to the normal title once
+  // this tab isn't mounted.
+  const baseTitleRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (typeof document === "undefined" || !data) return;
+    if (baseTitleRef.current === null) baseTitleRef.current = document.title;
+    const net = +(data.pnl.unrealised - data.charges.total).toFixed(2);
+    document.title = `${net >= 0 ? "+" : ""}₹${fmt(net)}`;
+    return () => { if (baseTitleRef.current !== null) document.title = baseTitleRef.current; };
+  }, [data]);
+
   // ── Exit a single position ─────────────────────────────────────────────────
   async function handleExit(tradingsymbol: string, quantity: number) {
     setExitError("");

@@ -37,7 +37,7 @@ function toHeikinAshi(candles: Candle[]): Candle[] {
   }
   return out;
 }
-type Indicator = "RSI" | "BB" | "VOL";
+type Indicator = "RSI" | "BB" | "VOL" | "VWAP";
 
 interface Candle {
   time: number; // unix seconds
@@ -81,31 +81,12 @@ const TF_LIST: TfConfig[] = [
   { label: "1W",  kiteInterval: "day",      fromDays: 1825, aggMinutes: 7200 },
 ];
 
-const HOLIDAYS_2026 = new Set([
-  "2026-01-26", "2026-02-18", "2026-03-20", "2026-04-03",
-  "2026-04-14", "2026-05-01", "2026-05-19", "2026-06-16",
-  "2026-10-02", "2026-10-22", "2026-11-10", "2026-11-11",
-  "2026-11-30", "2026-12-25",
-]);
-
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 function istToUnix(s: string): number {
   const [dp, tp] = s.split(" ");
   const [dd, mm, yyyy] = dp.split("-");
   const [hh, mi] = (tp ?? "09:15").split(":");
   return Date.UTC(+yyyy, +mm - 1, +dd, +hh, +mi) / 1000;
-}
-
-function getPrevTradingDay(): string {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  for (let i = 0; i < 10; i++) {
-    const day = d.getDay();
-    const str = d.toISOString().split("T")[0];
-    if (day !== 0 && day !== 6 && !HOLIDAYS_2026.has(str)) return str;
-    d.setDate(d.getDate() - 1);
-  }
-  return d.toISOString().split("T")[0];
 }
 
 function dateFromDaysAgo(days: number): string {
@@ -187,6 +168,25 @@ function computeRSI(closes: number[], period = 14): (number | null)[] {
       al = (al * (period - 1) + l2) / period;
       out[i] = al === 0 ? 100 : +(100 - 100 / (1 + ag / al)).toFixed(2);
     }
+  }
+  return out;
+}
+
+// VWAP resets each trading day — cumulative typical-price × volume from that
+// day's first candle. Same math as backend/src/utils/vwap.js's calcVWAP,
+// just re-anchored per UTC day since `time` here spans multiple sessions.
+function computeVWAP(candles: Candle[]): number[] {
+  const out: number[] = new Array(candles.length);
+  let cumPV = 0, cumVol = 0, curDay = -1;
+  for (let i = 0; i < candles.length; i++) {
+    const c   = candles[i];
+    const day = Math.floor(c.time / 86400);
+    if (day !== curDay) { cumPV = 0; cumVol = 0; curDay = day; }
+    const typical = (c.high + c.low + c.close) / 3;
+    const vol = c.volume || 0;
+    cumPV  += typical * vol;
+    cumVol += vol;
+    out[i] = +(cumVol > 0 ? cumPV / cumVol : typical).toFixed(2);
   }
   return out;
 }
@@ -512,9 +512,10 @@ export default function TradingChartModal({
     ctRef.current    = chartType;
     isDarkRef.current = isDark;
 
-    const closes = candles.map(c => c.close);
-    const rsiArr = computeRSI(closes);
-    const bbArr  = computeBB(closes);
+    const closes  = candles.map(c => c.close);
+    const rsiArr  = computeRSI(closes);
+    const bbArr   = computeBB(closes);
+    const vwapArr = computeVWAP(candles);
 
     if (chartRef.current) {
       chartRef.current.remove();
@@ -607,6 +608,12 @@ export default function TradingChartModal({
     s.bbMid = chart.addSeries(LineSeries, { ...bbBase, color: "#3b82f6", lineStyle: 0 } as any, 0);
     s.bbDn  = chart.addSeries(LineSeries, { ...bbBase, color: "#dc2626", lineStyle: 0 } as any, 0);
 
+    // VWAP overlay — same pane as price
+    s.vwap = chart.addSeries(LineSeries, {
+      color: "#a855f7", lineWidth: 2, lineStyle: 2,
+      lastValueVisible: ind.has("VWAP"), priceLineVisible: false, visible: ind.has("VWAP"),
+    } as any, 0);
+
     // Volume — overlay on main pane at bottom; start with empty data so bars are invisible until toggled
     s.vol = chart.addSeries(HistogramSeries, {
       priceScaleId: "vol",
@@ -645,6 +652,7 @@ export default function TradingChartModal({
     s.bbUp.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.up!  })));
     s.bbMid.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.mid! })));
     s.bbDn.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.dn!  })));
+    s.vwap.setData(candles.map((c, i) => ({ time: t(c), value: vwapArr[i] })));
     if (ind.has("VOL")) s.vol.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
     const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
     s.rsi.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
@@ -733,9 +741,10 @@ export default function TradingChartModal({
           const newAgg     = aggMin > 1 ? aggregate(rawRef.current, aggMin) : rawRef.current;
           const addedBars  = newAgg.length - prevAggLen;
 
-          const closes2 = newAgg.map(c => c.close);
-          const rsiArr2 = computeRSI(closes2);
-          const bbArr2  = computeBB(closes2);
+          const closes2  = newAgg.map(c => c.close);
+          const rsiArr2  = computeRSI(closes2);
+          const bbArr2   = computeBB(closes2);
+          const vwapArr2 = computeVWAP(newAgg);
           const tc = (c: Candle) => c.time as any;
           const s2 = seriesRef.current;
 
@@ -750,6 +759,7 @@ export default function TradingChartModal({
           s2.bbUp?.setData(bbV2.map(x => ({ time: tc(x.c), value: x.bb.up! })));
           s2.bbMid?.setData(bbV2.map(x => ({ time: tc(x.c), value: x.bb.mid! })));
           s2.bbDn?.setData(bbV2.map(x => ({ time: tc(x.c), value: x.bb.dn! })));
+          s2.vwap?.setData(newAgg.map((c, i) => ({ time: tc(c), value: vwapArr2[i] })));
           if (indRef.current.has("VOL")) {
             s2.vol?.setData(newAgg.map(c => ({ time: tc(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
           }
@@ -869,7 +879,8 @@ export default function TradingChartModal({
     setInd(new Set(next));
     const on = next.has(ind);
     const s  = seriesRef.current;
-    if (ind === "BB")  { s.bbUp?.applyOptions({ visible: on }); s.bbMid?.applyOptions({ visible: on }); s.bbDn?.applyOptions({ visible: on }); }
+    if (ind === "BB")   { s.bbUp?.applyOptions({ visible: on }); s.bbMid?.applyOptions({ visible: on }); s.bbDn?.applyOptions({ visible: on }); }
+    if (ind === "VWAP") { s.vwap?.applyOptions({ visible: on, lastValueVisible: on }); }
     if (ind === "VOL") {
       // Show/hide by swapping data — no reliance on series `visible` option
       if (on) {
@@ -937,9 +948,10 @@ export default function TradingChartModal({
     const s = seriesRef.current;
     if (!s.main || !chartRef.current) return;
     try {
-      const closes = candles.map(c => c.close);
-      const bbArr  = computeBB(closes, 20, 2);
-      const rsiArr = computeRSI(closes, 14);
+      const closes  = candles.map(c => c.close);
+      const bbArr   = computeBB(closes, 20, 2);
+      const rsiArr  = computeRSI(closes, 14);
+      const vwapArr = computeVWAP(candles);
       if (ctRef.current === "candle")
         s.main.setData(candles.map(c => ({ time: t(c), open: c.open, high: c.high, low: c.low, close: c.close })));
       else if (ctRef.current === "ha")
@@ -950,6 +962,7 @@ export default function TradingChartModal({
       s.bbUp?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.up! })));
       s.bbMid?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.mid! })));
       s.bbDn?.setData(bbV.map(x => ({ time: t(x.c), value: x.bb.dn! })));
+      s.vwap?.setData(candles.map((c, i) => ({ time: t(c), value: vwapArr[i] })));
       if (indRef.current.has("VOL")) s.vol?.setData(candles.map(c => ({ time: t(c), value: c.volume, color: c.close >= c.open ? "rgba(22,163,74,0.4)" : "rgba(220,38,38,0.4)" })));
       const rsiV = candles.map((c, i) => ({ c, rsi: rsiArr[i] })).filter(x => x.rsi != null);
       s.rsi?.setData(rsiV.map(x => ({ time: t(x.c), value: x.rsi! })));
@@ -1250,7 +1263,7 @@ export default function TradingChartModal({
           {indOpen && (
             <div className="absolute right-0 top-8 rounded-lg shadow-xl overflow-hidden z-[200] min-w-[110px]"
               style={{ background: panelBg, border: `1px solid ${border}` }}>
-              {(["RSI", "BB", "VOL"] as Indicator[]).map((ind, i) => (
+              {(["RSI", "BB", "VOL", "VWAP"] as Indicator[]).map((ind, i) => (
                 <button key={ind} onClick={() => toggleInd(ind)}
                   className="w-full flex items-center gap-2 px-3 py-2 text-[9px] font-bold cursor-pointer transition-colors hover:opacity-80"
                   style={{ ...MONO, borderTop: i > 0 ? `1px solid ${border}` : "none",

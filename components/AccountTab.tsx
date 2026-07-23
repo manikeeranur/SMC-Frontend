@@ -458,14 +458,15 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
   // new auto-trade-opened position (p.atStatus set, no existing localStorage
   // entry yet) — mirrors the real broker SL/Target the backend already set at
   // entry (see autoTrade.js/vwap930AutoTrade.js executeEntry) purely for
-  // on-screen visibility; does not itself touch the broker order. Runs before
-  // the "Lock All" global-toggle effect below so an active global toggle wins
-  // if both apply.
+  // on-screen visibility; does not itself touch the broker order.
+  // Lock points are intentionally NOT seeded here — a lock only ever comes
+  // from the "Lock All" global toggle or a per-trade manual Lock Pts entry
+  // (see effect below); otherwise a trade runs to Target 1/Target 2 as-is.
   const seededRef = useRef(false);
   useEffect(() => {
     if (seededRef.current || !accountDefaults || p.atStatus == null || p.buyPrice <= 0) return;
     const existing = loadSLTP(p.tradingsymbol);
-    if (existing.sl != null || existing.tp != null || existing.lockPts != null) { seededRef.current = true; return; }
+    if (existing.sl != null || existing.tp != null) { seededRef.current = true; return; }
     seededRef.current = true;
 
     const patch: Partial<SLTPStore> = {};
@@ -476,12 +477,6 @@ function PositionCard({ p, onExit, isExiting, defaultLockPts, accountDefaults }:
     if (accountDefaults.target != null) {
       const tp = +(p.buyPrice + accountDefaults.target).toFixed(2);
       setTpSet(tp); setTpInput(String(tp)); patch.tp = tp;
-    }
-    if (accountDefaults.lockPoints != null) {
-      const target = p.buyPrice + accountDefaults.lockPoints;
-      const dir = p.currentPrice >= target ? "down" : "up";
-      setLockSet(accountDefaults.lockPoints); setLockInput(String(accountDefaults.lockPoints)); setLockDir(dir);
-      patch.lockPts = accountDefaults.lockPoints; patch.lockDir = dir;
     }
     if (Object.keys(patch).length) saveSLTP(p.tradingsymbol, patch);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -954,13 +949,11 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
   // they survive refresh/restart/other devices; falls back to today's
   // hardcoded backend constants if the fetch fails.
   const [accountDefaults, setAccountDefaults] = useState<AccountDefaults | null>(null);
-  const [defLockInput,    setDefLockInput]    = useState("");
   const [defSlInput,      setDefSlInput]      = useState("");
   const [defTargetInput,  setDefTargetInput]  = useState("");
 
   // Whether each field's toggle is open (input visible) — same on/off pattern
   // as "Lock All", so the whole panel is one consistent toggle-switch UI.
-  const [showDefLock,   setShowDefLock]   = useState(false);
   const [showDefSl,     setShowDefSl]     = useState(false);
   const [showDefTarget, setShowDefTarget] = useState(false);
 
@@ -968,15 +961,19 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
     settingsApi.get()
       .then(s => {
         setAccountDefaults(s.accountDefaults);
-        setDefLockInput(s.accountDefaults.lockPoints != null ? String(s.accountDefaults.lockPoints) : "");
         setDefSlInput(s.accountDefaults.stopLoss   != null ? String(s.accountDefaults.stopLoss)   : "");
         setDefTargetInput(s.accountDefaults.target != null ? String(s.accountDefaults.target)     : "");
-        setShowDefLock(s.accountDefaults.lockPoints != null);
         setShowDefSl(s.accountDefaults.stopLoss     != null);
         setShowDefTarget(s.accountDefaults.target   != null);
         setGlobalLockOn(s.globalLock?.on ?? false);
         setGlobalLockPts(s.globalLock?.pts ?? null);
         setGlobalLockInput(s.globalLock?.pts != null ? String(s.globalLock.pts) : "");
+        // One-time cleanup: Default Lock Points is retired (locks now only
+        // come from Lock All or a per-trade manual entry) — clear any stale
+        // value left over from when this setting existed.
+        if (s.accountDefaults.lockPoints != null) {
+          settingsApi.updateAccountDefaults({ lockPoints: null }).catch(() => {});
+        }
       })
       .catch(() => setAccountDefaults({
         lockPoints: null, stopLoss: null, target: null,
@@ -997,10 +994,6 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
     }
   }
 
-  function saveDefLock() {
-    const v = defLockInput === "" ? null : parseFloat(defLockInput);
-    if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ lockPoints: v }, v === null ? "Default Lock Points cleared" : `Default Lock Points set to ${v}`);
-  }
   function saveDefSl() {
     const v = defSlInput === "" ? null : parseFloat(defSlInput);
     if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ stopLoss: v }, v === null ? "Default Stop Loss cleared" : `Default Stop Loss set to ${v} pts`);
@@ -1010,10 +1003,6 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
     if (v === null || (!isNaN(v) && v > 0)) updateAccountDefaults({ target: v }, v === null ? "Default Target cleared" : `Default Target set to ${v} pts`);
   }
 
-  function toggleDefLock() {
-    if (showDefLock) { setShowDefLock(false); setDefLockInput(""); updateAccountDefaults({ lockPoints: null }, "Default Lock Points disabled"); }
-    else setShowDefLock(true);
-  }
   function toggleDefSl() {
     if (showDefSl) { setShowDefSl(false); setDefSlInput(""); updateAccountDefaults({ stopLoss: null }, "Default Stop Loss disabled"); }
     else setShowDefSl(true);
@@ -1077,10 +1066,12 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
 
   // Report open-position state up to the page — the browser-tab favicon/title
   // indicator lives there since it also needs scan/WS status this component
-  // doesn't have. Keyed off a derived boolean, not the `displayPositions`
-  // array itself, since that array gets a new reference on every 500ms poll
-  // tick — keying off it directly would fire the callback twice a second.
-  const hasOpenPosition = displayPositions.some(p => p.status === "OPEN");
+  // doesn't have. Scoped to atStatus != null (SMC/VWAP auto-trade positions
+  // only, not manual trades) per the tab indicator's definition. Keyed off a
+  // derived boolean, not the `displayPositions` array itself, since that
+  // array gets a new reference on every 500ms poll tick — keying off it
+  // directly would fire the callback twice a second.
+  const hasOpenPosition = displayPositions.some(p => p.status === "OPEN" && p.atStatus != null);
   useEffect(() => {
     onOpenPositionChange?.(hasOpenPosition);
   }, [hasOpenPosition, onOpenPositionChange]);
@@ -1545,10 +1536,6 @@ export function AccountTab({ onOpenPositionChange }: { onOpenPositionChange?: (h
             <ToggleField label="🔒 Lock All" show={globalLockOn} onToggle={toggleGlobalLock}
               value={globalLockPts} input={globalLockInput} setInput={setGlobalLockInput}
               onApply={applyGlobalLock} activeColor="#6366f1" />
-
-            <ToggleField label="🔒 Lock Points" show={showDefLock} onToggle={toggleDefLock}
-              value={accountDefaults?.lockPoints ?? null} input={defLockInput} setInput={setDefLockInput}
-              onApply={saveDefLock} activeColor="#6366f1" />
 
             <ToggleField label="🛑 Stop Loss" show={showDefSl} onToggle={toggleDefSl}
               value={accountDefaults?.stopLoss ?? null} input={defSlInput} setInput={setDefSlInput}

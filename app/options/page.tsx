@@ -332,18 +332,10 @@ function OptionsPageInner() {
   const wsRef   = useRef<WebSocket | null>(null);
   const [hasOpenPosition, setHasOpenPosition] = useState(false);
 
-  // Browser-tab indicator: green only when something real is happening —
-  // SMC or VWAP930 actually ran a scan recently (lastScanAt within the cron
-  // interval, not just "market is open" — scanActive is a pure clock check
-  // and is true all afternoon even with zero alerts), or a position is open.
-  // Otherwise red. Always one or the other, never hidden.
-  const SCAN_RECENCY_MS = 90_000; // SMC cron runs every 60s; VWAP930 once at 9:30
-  const smcRecentlyScanned = !!(smcStatus?.lastScanAt
-    && Date.now() - new Date(smcStatus.lastScanAt).getTime() < SCAN_RECENCY_MS);
-  const vwapRecentlyScanned = !!(vwapStatus?.lastScanAt
-    && Date.now() - new Date(vwapStatus.lastScanAt).getTime() < SCAN_RECENCY_MS);
-  const tabIndicatorColor: "green" | "red" =
-    (smcRecentlyScanned || vwapRecentlyScanned || hasOpenPosition) ? "green" : "red";
+  // Browser-tab indicator: green only while an SMC or VWAP930 auto-trade
+  // position is currently open (hasOpenPosition is scoped to those — see
+  // AccountTab.tsx); red otherwise. Always one or the other, never hidden.
+  const tabIndicatorColor: "green" | "red" = hasOpenPosition ? "green" : "red";
   useTabIndicator(tabIndicatorColor);
   // 1-min candle closes per option token → for RSI(14) on watchlist
   const priceHistRef = useRef<

@@ -6574,6 +6574,8 @@ function VWAP930TableView({
     if (status === "EOD")    return { icon: "🕐", label: "EOD",    color: "#b45309" };
     if (status === "TIME_EXIT")
       return { icon: "⏱", label: "15:20 EXIT", color: pnl >= 0 ? "#16a34a" : "#e11d48" };
+    if (status === "STAGNANT_EXIT")
+      return { icon: "💤", label: "STAGNANT", color: pnl >= 0 ? "#16a34a" : "#e11d48" };
     return { icon: "⏳", label: "ACTIVE", color: "#0284c7" };
   };
 

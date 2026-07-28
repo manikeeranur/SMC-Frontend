@@ -5259,8 +5259,10 @@ function SMCTableView({
                 type="date"
                 value={histDate}
                 max={(() => {
+                  // Today's session data is available intraday once candles
+                  // print, so today is a valid backtest date too — not just
+                  // up to yesterday.
                   const d = new Date();
-                  d.setDate(d.getDate() - 1);
                   return d.toISOString().split("T")[0];
                 })()}
                 onChange={(e) => onHistDateChange(e.target.value)}
@@ -6689,8 +6691,10 @@ function VWAP930TableView({
                 type="date"
                 value={histDate}
                 max={(() => {
+                  // Today's session data is available intraday once candles
+                  // print, so today is a valid backtest date too — not just
+                  // up to yesterday.
                   const d = new Date();
-                  d.setDate(d.getDate() - 1);
                   return d.toISOString().split("T")[0];
                 })()}
                 onChange={(e) => onHistDateChange(e.target.value)}
@@ -6843,6 +6847,7 @@ function VWAP930TableView({
               const target = a.rr?.target ?? 0;
               const ltp    = a.leg?.ltp ?? a.lastLtp ?? a.rr?.entry ?? 0;
               const fill   = target - sl > 0 ? Math.min(Math.max(((ltp - sl) / (target - sl)) * 100, 0), 100) : 50;
+              const tHit   = a.status === "TARGET";
               return (
                 <div
                   key={a.id ?? idx}
@@ -6850,11 +6855,13 @@ function VWAP930TableView({
                   style={{
                     background: isDark ? "#0d1420" : "#fff",
                     border: `1px solid ${a.status === "TARGET" ? "#22c55e33" : a.status === "SL" ? "#ef444433" : isDark ? "#1e2a3a" : "#e2e8f0"}`,
-                    borderLeft: `3px solid ${sm.color}`,
+                    borderLeft: `3px solid ${a.status === "TARGET" ? "#22c55e" : a.status === "SL" ? "#e11d48" : a.status === "ACTIVE" ? dirClr : "#334155"}`,
                   }}
                 >
+                  {/* Top section */}
                   <div className="px-3 py-3 flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                      {/* Direction badge */}
                       <div
                         className="w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0"
                         style={{ background: `${dirClr}18`, border: `1.5px solid ${dirClr}40` }}
@@ -6862,6 +6869,7 @@ function VWAP930TableView({
                         <span className="text-[7px] font-bold" style={{ ...MONO, color: "#64748b" }}>NI</span>
                         <span className="text-[12px] font-bold" style={{ ...BEBAS, color: dirClr }}>{a.direction}</span>
                       </div>
+                      {/* Instrument + time + VWAP tag */}
                       <div className="flex-1 min-w-0">
                         <div className="text-[15px] font-bold leading-tight" style={{ ...BEBAS, color: isDark ? "#e2e8f0" : "#1e293b" }}>
                           NIFTY {a.strike} {a.direction === "CE" ? "Call" : "Put"}
@@ -6880,6 +6888,7 @@ function VWAP930TableView({
                         </div>
                       </div>
                     </div>
+                    {/* Right: status + TGT tick + chart */}
                     <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
                       <span
                         className="text-[8px] font-bold px-2 py-0.5 rounded-full"
@@ -6887,6 +6896,18 @@ function VWAP930TableView({
                       >
                         {sm.icon} {sm.label}
                       </span>
+                      <div className="flex gap-1">
+                        <span
+                          className="text-[7px] px-1.5 py-0.5 rounded-sm font-bold"
+                          style={{
+                            ...MONO,
+                            background: tHit ? (isDark ? "#052e16" : "#dcfce7") : (isDark ? "#0f1923" : "#f1f5f9"),
+                            color: tHit ? "#15803d" : (isDark ? "#4a6080" : "#94a3b8"),
+                          }}
+                        >
+                          TGT{tHit ? "✓" : "✗"}
+                        </span>
+                      </div>
                       {a.strike && a.direction && (
                         <button
                           onClick={() => { const t = a.leg?.token ?? resolveToken(a.strike, a.direction); if (t) onOpenChart(t, a.strike, a.direction as "CE" | "PE", a.leg?.tradingsymbol); }}
@@ -6899,6 +6920,7 @@ function VWAP930TableView({
                       )}
                     </div>
                   </div>
+                  {/* Progress bar for ACTIVE */}
                   {a.status === "ACTIVE" && (
                     <div className="px-3 pb-2">
                       <div className="h-1.5 bg-[#e2e8f0] rounded-full overflow-hidden w-full">
@@ -6909,6 +6931,7 @@ function VWAP930TableView({
                       </div>
                     </div>
                   )}
+                  {/* SL / TGT / MAX single bold line above footer */}
                   <div
                     className="px-3 py-1.5 flex items-center gap-3 border-t"
                     style={{ background: isDark ? "#0d1420" : "#fff", borderColor: isDark ? "#1e2a3a" : "#e2e8f0" }}
@@ -6918,26 +6941,80 @@ function VWAP930TableView({
                     </span>
                     <span className="text-[9px] font-bold" style={{ ...MONO, color: "#16a34a" }}>
                       TGT ₹{a.rr?.target?.toFixed(2) ?? "—"}
+                      {tHit ? " ✓" : ""}
                     </span>
-                    <span className="text-[9px] font-bold ml-auto" style={{ ...MONO, color: pnlClr }}>
-                      {pnlUp ? "+" : "−"}₹{fmtFull((a.currentPnL ?? 0) * LOT_QTY)}
-                    </span>
+                    {(a.peakMove ?? 0) > 0 && (
+                      <span className="text-[9px] font-bold" style={{ ...MONO, color: "#7c3aed" }}>
+                        MAX +{a.peakMove.toFixed(1)}
+                      </span>
+                    )}
                   </div>
-                  {a.leg && a.status === "ACTIVE" && (
-                    <div className="px-3 pb-2.5 flex justify-end">
-                      <button
-                        onClick={() => onAddWatch(a.leg)}
-                        title="Add to watchlist"
-                        className="w-6 h-6 flex items-center justify-center rounded text-[11px] font-bold border cursor-pointer transition-all"
-                        style={{ background: `${dirClr}15`, borderColor: `${dirClr}50`, color: dirClr }}
-                      >
-                        +
-                      </button>
+                  {/* Footer: single row — ENTRY | CMP/SL | LOT P&L */}
+                  <div
+                    className="grid grid-cols-3 border-t"
+                    style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#e2e8f0" }}
+                  >
+                    {/* ENTRY */}
+                    <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                      <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#64748b" }}>ENTRY</div>
+                      <div className="text-[12px] font-bold tabular-nums" style={{ ...MONO, color: dirClr }}>
+                        ₹{a.rr?.entry?.toFixed(2) ?? "—"}
+                      </div>
                     </div>
-                  )}
+                    {/* CMP (ACTIVE) or SL */}
+                    <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                      <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#64748b" }}>
+                        {a.status === "ACTIVE" ? "CMP" : "SL"}
+                      </div>
+                      <div
+                        className="text-[12px] font-bold tabular-nums"
+                        style={{
+                          ...MONO,
+                          color: a.status === "ACTIVE"
+                            ? ((a.lastLtp ?? ltp) >= (a.rr?.entry ?? 0) ? "#16a34a" : "#e11d48")
+                            : "#e11d48",
+                        }}
+                      >
+                        ₹{(a.status === "ACTIVE" ? (a.lastLtp ?? ltp) : a.rr?.sl)?.toFixed(2) ?? "—"}
+                      </div>
+                      {a.status === "ACTIVE" && (
+                        <div className="text-[7px] mt-0.5" style={{ ...MONO, color: "#94a3b8" }}>
+                          SL ₹{a.rr?.sl?.toFixed(0)}
+                        </div>
+                      )}
+                    </div>
+                    {/* LOT P&L */}
+                    <div className="px-3 py-2" style={{ background: isDark ? "#0a0f16" : "#f8fafc" }}>
+                      <div className="text-[7px] tracking-[1px] mb-0.5" style={{ ...MONO, color: "#64748b" }}>LOT P&L</div>
+                      <div className="text-[13px] font-bold tabular-nums" style={{ ...MONO, color: pnlClr }}>
+                        {fmtLotPnl((a.currentPnL ?? 0) * LOT_QTY)}
+                      </div>
+                      <div className="text-[8px]" style={{ ...MONO, color: pnlClr }}>
+                        {pnlUp ? "+" : ""}{a.pnlPct?.toFixed(1) ?? "0.0"}%
+                      </div>
+                    </div>
+                  </div>
                 </div>
               );
             })}
+            {/* Mobile totals row */}
+            <div
+              className="rounded-xl overflow-hidden"
+              style={{ background: isDark ? "#0d1420" : "#f8fafc", border: `1px solid ${isDark ? "#1e2a3a" : "#e2e8f0"}` }}
+            >
+              <div className="grid grid-cols-3" style={{ gap: "1px", background: isDark ? "#1e2a3a" : "#e2e8f0" }}>
+                {[
+                  { label: "TRADES", val: `${tableAlerts.length}`, color: "#475569" },
+                  { label: "WIN RATE", val: wr ? `${wr}%` : "—", color: wr && Number(wr) >= 70 ? "#16a34a" : "#e11d48" },
+                  { label: "LOT P&L", val: tableAlerts.length > 0 ? fmtLotPnl(totalLotPnl) : "—", color: totalLotPnl >= 0 ? "#16a34a" : "#e11d48" },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="px-3 py-2.5 text-center" style={{ background: isDark ? "#0a0f16" : "#fff" }}>
+                    <div className="text-[7px] tracking-[1.5px] mb-1" style={{ ...MONO, color: "#64748b" }}>{label}</div>
+                    <div className="text-[15px] font-bold" style={{ ...MONO, color }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* ── DESKTOP TABLE ── */}

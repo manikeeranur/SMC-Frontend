@@ -10,14 +10,16 @@ export const SMC_MIN_PREMIUM = 200;
 export const SMC_MAX_PREMIUM = 300;
 
 // ─── VWAP 9:30 Strategy ─────────────────────────────────────────────────────────
-// Exact 09:30 IST entry only · CE/PE whose premium is ₹130–₹150 AND price is
-// touching/above its own VWAP · single entry per day · Target +30% / SL −8%
+// No entries before 09:30 IST (continuous scan after that, no fixed
+// checkpoint) · CE/PE whose premium is ₹130–₹150 AND whose own 3-min candle
+// CLOSES above its VWAP · immediate exit if that candle closes below VWAP,
+// no waiting for SL/Target · single entry per day · Target +8% / SL −8% (1:1)
 export const VWAP930_MIN_PREMIUM = 130;
 export const VWAP930_MAX_PREMIUM = 150;
 export const VWAP930_SL_PCT      = 8;   // stop loss  −8%
-export const VWAP930_TARGET_PCT  = 30;  // target     +30%
+export const VWAP930_TARGET_PCT  = 8;   // target     +8%
 export const VWAP930_NUM_LOTS    = 10;  // 10 lots, single entry per day
-export const VWAP930_ENTRY_TIME  = "09:30";
+export const VWAP930_ENTRY_TIME  = "09:30"; // no entries before this — not a fixed checkpoint
 
 export const LOT_SIZES: Record<string, number> = {
   NIFTY:   LOT_SIZE,

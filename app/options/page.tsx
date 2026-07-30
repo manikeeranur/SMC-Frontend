@@ -6576,6 +6576,8 @@ function VWAP930TableView({
       return { icon: "⏱", label: "15:20 EXIT", color: pnl >= 0 ? "#16a34a" : "#e11d48" };
     if (status === "STAGNANT_EXIT")
       return { icon: "💤", label: "STAGNANT", color: pnl >= 0 ? "#16a34a" : "#e11d48" };
+    if (status === "VWAP_EXIT")
+      return { icon: "⚡", label: "VWAP EXIT", color: pnl >= 0 ? "#16a34a" : "#e11d48" };
     return { icon: "⏳", label: "ACTIVE", color: "#0284c7" };
   };
 
@@ -6790,9 +6792,9 @@ function VWAP930TableView({
           VWAP 9:30:
         </span>
         <span className="text-[7px] text-[#94a3b8]" style={MONO}>
-          NIFTY premium ₹{VWAP930_MIN_PREMIUM}–₹{VWAP930_MAX_PREMIUM} · CE/PE touching/above own VWAP ·
-          SL −{VWAP930_SL_PCT}% · Target +{VWAP930_TARGET_PCT}% · entry only at {VWAP930_ENTRY_TIME} ·
-          1 trade/day · {VWAP930_NUM_LOTS} lots
+          NIFTY premium ₹{VWAP930_MIN_PREMIUM}–₹{VWAP930_MAX_PREMIUM} · green strong-bodied 3-min candle close above own VWAP ·
+          SL −{VWAP930_SL_PCT}% · Target +{VWAP930_TARGET_PCT}% · immediate exit on candle close below VWAP ·
+          entry any time after {VWAP930_ENTRY_TIME} · 1 trade/day · {VWAP930_NUM_LOTS} lots
         </span>
       </div>
 

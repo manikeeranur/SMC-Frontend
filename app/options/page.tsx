@@ -43,6 +43,7 @@ import {
 } from "@/lib/api";
 
 import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, VWAP930_MIN_PREMIUM, VWAP930_MAX_PREMIUM, VWAP930_SL_PCT, VWAP930_TARGET_PCT, VWAP930_NUM_LOTS, VWAP930_ENTRY_TIME } from "@/lib/constants";
+import { useAccountQty } from "@/lib/useAccountQty";
 import { useHolidays } from "@/lib/holidays";
 import HolidaysTab from "@/components/HolidaysTab";
 import { ThemeToggle, useTheme } from "@/lib/theme";
@@ -5042,7 +5043,8 @@ function SMCTableView({
   const total = wins + losses;
   const wr = total > 0 ? ((wins / total) * 100).toFixed(1) : null;
 
-  const LOT_QTY = LOT_SIZE * NUM_LOTS;
+  const acctQty = useAccountQty(NUM_LOTS);
+  const LOT_QTY = LOT_SIZE * acctQty;
 
   useEffect(() => {
     const color = active > 0 ? "#16a34a" : "#dc2626";
@@ -5903,7 +5905,7 @@ function SMCTableView({
                   "T1",
                   "T2",
                   "STATUS",
-                  `P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
+                  `P&L · LOT (${acctQty}×${LOT_SIZE}=${LOT_QTY})`,
                   "CHARGES",
                   "MAX PTS",
                   "MAX PROFITS",
@@ -6531,7 +6533,8 @@ function VWAP930TableView({
   const total   = wins + losses;
   const wr      = total > 0 ? ((wins / total) * 100).toFixed(1) : null;
 
-  const LOT_QTY = LOT_SIZE * VWAP930_NUM_LOTS;
+  const acctQty = useAccountQty(VWAP930_NUM_LOTS);
+  const LOT_QTY = LOT_SIZE * acctQty;
   const V_COLS = "80px 1fr 90px 90px 80px 80px 110px 150px 90px 80px 130px 80px";
 
   const fmtLotPnl = (n: number) => {
@@ -6794,7 +6797,7 @@ function VWAP930TableView({
         <span className="text-[7px] text-[#94a3b8]" style={MONO}>
           NIFTY premium ₹{VWAP930_MIN_PREMIUM}–₹{VWAP930_MAX_PREMIUM} · green strong-bodied 3-min candle close above own VWAP ·
           SL −{VWAP930_SL_PCT}% · Target +{VWAP930_TARGET_PCT}% · immediate exit on candle close below VWAP ·
-          entry any time after {VWAP930_ENTRY_TIME} · 1 trade/day · {VWAP930_NUM_LOTS} lots
+          entry any time after {VWAP930_ENTRY_TIME} · 1 trade/day · {acctQty} lots
         </span>
       </div>
 
@@ -7036,7 +7039,7 @@ function VWAP930TableView({
                   "SL",
                   "TARGET",
                   "STATUS",
-                  `P&L · LOT (${VWAP930_NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,
+                  `P&L · LOT (${acctQty}×${LOT_SIZE}=${LOT_QTY})`,
                   "CHARGES",
                   "MAX PTS",
                   "MAX PROFITS",

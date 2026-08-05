@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/lib/theme";
 import { LOT_SIZE, NUM_LOTS } from "@/lib/constants";
 import { useHolidaysMap } from "@/lib/holidays";
+import { useAccountQty } from "@/lib/useAccountQty";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
 
@@ -81,7 +82,6 @@ function buildCalendar(year: number, month: number): (number | null)[] {
   return cells;
 }
 
-const LOT_QTY = LOT_SIZE * NUM_LOTS;
 const COLS_DESKTOP = "40px 120px 1fr 90px 70px 70px 72px 72px 90px 155px 90px 65px 130px";
 
 function fmtFull(n: number) {
@@ -104,6 +104,9 @@ function calcCharges(entryPrice: number, exitPrice: number, qty: number): number
 export function ResultsContent() {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+
+  const acctQty = useAccountQty(NUM_LOTS);
+  const LOT_QTY = LOT_SIZE * acctQty;
 
   const holidaysMap = useHolidaysMap();
   const [tab, setTab]           = useState<"backtest" | "live">("live");
@@ -553,7 +556,7 @@ export function ResultsContent() {
                   <div style={{ minWidth: "900px" }}>
                     <div className="grid flex-shrink-0 border-b-2"
                       style={{ gridTemplateColumns: COLS_DESKTOP, borderColor: isDark ? "#1e2a3a" : "#cbd5e1", background: isDark ? "#080d14" : "#f8fafc" }}>
-                      {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${NUM_LOTS}×${LOT_SIZE}=${LOT_QTY})`,"CHARGES","MAX PTS","MAX PROFITS"].map(h => (
+                      {["#","TIME","CONCEPTS","STRIKE","ENTRY","SL","T1","T2","STATUS",`P&L · LOT (${acctQty}×${LOT_SIZE}=${LOT_QTY})`,"CHARGES","MAX PTS","MAX PROFITS"].map(h => (
                         <div key={h} className="px-2 py-2 text-[8px] font-bold tracking-[1.5px] uppercase"
                           style={{ ...MONO, color: isDark ? "#4a6080" : "#64748b" }}>{h}</div>
                       ))}

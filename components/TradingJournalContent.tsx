@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "@/lib/theme";
 import { LOT_SIZE, NUM_LOTS } from "@/lib/constants";
 import { useHolidaysMap } from "@/lib/holidays";
+import { useAccountQty } from "@/lib/useAccountQty";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 
 const API    = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
@@ -14,7 +15,6 @@ const ACCENT = "#7c3aed";
 const MONTH_NAMES  = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const MONTH_SHORT  = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
 const DAY_NAMES    = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-const LOT_QTY      = LOT_SIZE * NUM_LOTS;
 
 type DaySummary = { date: string; totalPnL: number; trades: number; wins: number };
 type ViewType   = "month" | "year" | "overall";
@@ -166,6 +166,8 @@ function CalHeatmap({ year, month, summaryMap, isDark, border, color, muted }: {
 }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const holidaysMap = useHolidaysMap();
+  const acctQty = useAccountQty(NUM_LOTS);
+  const LOT_QTY = LOT_SIZE * acctQty;
   const cells = buildCalendar(year, month);
 
   const maxAbs = Math.max(
@@ -519,6 +521,8 @@ function JournalTradesSection({ isDark, border, color, muted, strategy }: {
   const [visCols,     setVisCols]  = useState<Set<ColKey>>(new Set(COL_DEFS.map(c => c.key)));
   const [pageSize,    setPageSz]   = useState(10);
   const filterRef = useRef<HTMLDivElement>(null);
+  const acctQty = useAccountQty(NUM_LOTS);
+  const LOT_QTY = LOT_SIZE * acctQty;
 
   const dynTCOLS = "30px " + COL_DEFS.filter(c => visCols.has(c.key)).map(c => c.w).join(" ");
 
@@ -1155,6 +1159,8 @@ function JournalTradesSection({ isDark, border, color, muted, strategy }: {
 export function TradingJournalContent() {
   const { theme } = useTheme();
   const isDark = theme === "dark";
+  const acctQty = useAccountQty(NUM_LOTS);
+  const LOT_QTY = LOT_SIZE * acctQty;
 
   const [viewType, setViewType] = useState<ViewType>("month");
   const [strategy, setStrategy] = useState<"smc" | "vwap930">("smc");

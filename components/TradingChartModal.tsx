@@ -18,7 +18,8 @@ import {
 } from "@/components/ui/select";
 import { optionsApi, accountApi, createWS, isDemoMode } from "@/lib/api";
 import { calcRR } from "@/lib/options";
-import { getLotSize } from "@/lib/constants";
+import { getLotSize, NUM_LOTS } from "@/lib/constants";
+import { useAccountQty } from "@/lib/useAccountQty";
 import { useTheme } from "@/lib/theme";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -249,7 +250,17 @@ export default function TradingChartModal({
   const [tradeLines, setTL] = useState<{ entry:number; target:number; target2?:number; sl:number; entryTime:string } | null>(null);
   const [exitState,  setExitState] = useState<"idle"|"loading"|"done"|"error">("idle");
   const [acctLivePos, setAcctLivePos] = useState<{ tradingsymbol:string; buyPrice:number; currentPrice:number; quantity:number; pnl:number; status:string; direction:string } | null>(null);
-  const [orderLots, setOL]  = useState(1);
+  // Default lot count comes from the dashboard's Auto-Trade Defaults
+  // (accountDefaults.quantity) — synced once when it first resolves, so a
+  // manual +/- adjustment mid-session isn't fought by the 30s settings poll.
+  // Applies regardless of simple/technical chart mode — placeOrder() below
+  // reads orderLots live at click time either way.
+  const acctQty = useAccountQty(NUM_LOTS);
+  const [orderLots, setOL]  = useState(NUM_LOTS);
+  const orderLotsInitRef = useRef(false);
+  useEffect(() => {
+    if (!orderLotsInitRef.current) { orderLotsInitRef.current = true; setOL(acctQty); }
+  }, [acctQty]);
   const [tradeOpen, setTO]  = useState(false); // footer trade panel visibility
   const [indOpen,   setIndOpen] = useState(false);
   const [equityMode, setEquityMode] = useState<"intraday" | "swing">(isEquity ? "swing" : "intraday");

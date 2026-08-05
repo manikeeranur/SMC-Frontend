@@ -250,7 +250,16 @@ function OptionsPageInner() {
   const [chainOrderPanel, setChainOrderPanel] = useState<ChainOrder | null>(
     null,
   );
-  const [orderLots, setOrderLots] = useState(1);
+  // Default lot count comes from the dashboard's Auto-Trade Defaults
+  // (accountDefaults.quantity) — synced once when it first resolves, so a
+  // manual +/- adjustment mid-session isn't fought by the 30s settings poll.
+  // Shared by scalper (chainOrderPanel) and strategy (basketLegs) — same state.
+  const acctQty = useAccountQty(NUM_LOTS);
+  const [orderLots, setOrderLots] = useState(NUM_LOTS);
+  const orderLotsInitRef = useRef(false);
+  useEffect(() => {
+    if (!orderLotsInitRef.current) { orderLotsInitRef.current = true; setOrderLots(acctQty); }
+  }, [acctQty]);
   const [basketLegs, setBasketLegs] = useState<ChainOrder[]>([]);
   const [walletAvailable, setWalletAvailable] = useState<number | null>(null);
   const [orderState, setOrderState] = useState<{ loading: boolean; result: string | null }>({ loading: false, result: null });
@@ -1018,6 +1027,38 @@ function OptionsPageInner() {
     } catch (err: any) {
       setOrderState({ loading: false, result: `✗ ${err.message}` });
       setTimeout(() => setOrderState({ loading: false, result: null }), 4000);
+    }
+  }
+
+  // ── Place one market order per basket leg (strategy mode) — sequential so a
+  // failed leg doesn't cancel the ones already placed; failed legs stay in the
+  // basket for retry, succeeded ones are removed. ─────────────────────────────
+  async function handleExecuteBasket() {
+    if (!basketLegs.length) return;
+    const qty = orderLots * chainLotSize;
+    const exchange = chainIndex === "SENSEX" ? "BFO" : "NFO";
+    setOrderState({ loading: true, result: null });
+
+    const failed: ChainOrder[] = [];
+    let placed = 0;
+    for (const l of basketLegs) {
+      const tradingsymbol = l.leg.tradingsymbol || "";
+      if (!tradingsymbol) { failed.push(l); continue; }
+      try {
+        await accountApi.placeOrder(tradingsymbol, l.action, qty, exchange);
+        placed++;
+      } catch {
+        failed.push(l);
+      }
+    }
+
+    setBasketLegs(failed);
+    if (!failed.length) {
+      setOrderState({ loading: false, result: `✓ ${placed} order${placed > 1 ? "s" : ""} placed` });
+      setTimeout(() => setOrderState({ loading: false, result: null }), 3000);
+    } else {
+      setOrderState({ loading: false, result: `✗ ${placed}/${basketLegs.length} placed — ${failed.length} failed, still in basket` });
+      setTimeout(() => setOrderState({ loading: false, result: null }), 5000);
     }
   }
 
@@ -2056,7 +2097,7 @@ function OptionsPageInner() {
                             token: leg.token,
                             leg,
                           });
-                          setOrderLots(1);
+                          setOrderLots(acctQty);
                         }
                       }}
                       onOpenChart={(token, strike, type, sym, tradingsymbol) => {
@@ -2349,11 +2390,22 @@ function OptionsPageInner() {
                           className="w-7 h-7 rounded-full flex items-center justify-center font-bold"
                           style={{ background: btnBg, color: btnColor }}>+</button>
                       </div>
+                      {orderState.result && (
+                        <div className="mx-4 mb-2 px-3 py-2 rounded-lg text-[9px] text-center font-bold"
+                          style={{
+                            ...MONO,
+                            background: orderState.result.startsWith("✓") ? "#16a34a15" : "#e11d4815",
+                            color:      orderState.result.startsWith("✓") ? "#16a34a"   : "#e11d48",
+                            border:     `1px solid ${orderState.result.startsWith("✓") ? "#16a34a30" : "#e11d4830"}`,
+                          }}>
+                          {orderState.result}
+                        </div>
+                      )}
                       <div className="px-4 pb-3">
-                        <button disabled={!canExecute}
+                        <button disabled={!canExecute || orderState.loading} onClick={handleExecuteBasket}
                           className="w-full py-2.5 rounded-xl text-[12px] font-black tracking-[1px] transition-opacity"
-                          style={{ background: canExecute ? "#16a34a" : "#16a34a40", color: "#fff", opacity: canExecute ? 1 : 0.5, ...MONO }}>
-                          Execute Basket ({basketLegs.length} leg{basketLegs.length > 1 ? "s" : ""})
+                          style={{ background: canExecute ? "#16a34a" : "#16a34a40", color: "#fff", opacity: (canExecute && !orderState.loading) ? 1 : 0.5, ...MONO }}>
+                          {orderState.loading ? "Placing..." : `Execute Basket (${basketLegs.length} leg${basketLegs.length > 1 ? "s" : ""})`}
                         </button>
                       </div>
                       {!canExecute && walletAvailable !== null && (

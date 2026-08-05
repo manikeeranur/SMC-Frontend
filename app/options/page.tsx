@@ -80,6 +80,7 @@ import {
   IconTrash,
   IconNotebook,
   IconCalendarEvent,
+  IconColumns,
 } from "@tabler/icons-react";
 
 const MONO = { fontFamily: "'Space Mono', monospace" } as const;
@@ -106,6 +107,20 @@ function Pill({ label, color }: { label: string; color: string }) {
     </span>
   );
 }
+
+type ChartTarget = {
+  token: number;
+  strike: number;
+  type: "CE" | "PE";
+  expiry: string;
+  sym: string;
+  tradingsymbol?: string;
+  index: string;
+  isEquity?: boolean;
+  isIndex?: boolean;
+  prevClose?: number;
+  ltpChange?: number;
+};
 
 // ─── Inner page (uses useSearchParams — must be inside Suspense) ───────────────
 function OptionsPageInner() {
@@ -241,19 +256,10 @@ function OptionsPageInner() {
   const [orderState, setOrderState] = useState<{ loading: boolean; result: string | null }>({ loading: false, result: null });
 
   // ── Trading chart modal ──────────────────────────────────────────────────────
-  const [chartTarget, setChartTarget] = useState<{
-    token: number;
-    strike: number;
-    type: "CE" | "PE";
-    expiry: string;
-    sym: string;
-    tradingsymbol?: string;
-    index: string;
-    isEquity?: boolean;
-    isIndex?: boolean;
-    prevClose?: number;
-    ltpChange?: number;
-  } | null>(null);
+  const [chartTarget, setChartTarget] = useState<ChartTarget | null>(null);
+  // Split view — CE + PE of the same strike, side by side (mutually
+  // exclusive with the single chartTarget above; opening one clears the other).
+  const [splitChartTarget, setSplitChartTarget] = useState<{ ce: ChartTarget; pe: ChartTarget } | null>(null);
 
   // Restore all persisted state after mount (avoids SSR hydration mismatch)
   useEffect(() => {
@@ -1606,7 +1612,7 @@ function OptionsPageInner() {
           ).map(({ tab, icon, label, badge }: any) => (
             <button
               key={tab}
-              onClick={() => { setActiveTab(tab); setChartTarget(null); }}
+              onClick={() => { setActiveTab(tab); setChartTarget(null); setSplitChartTarget(null); }}
               title={label}
               className="relative flex flex-col items-center justify-center w-11 h-11 rounded-xl cursor-pointer transition-all"
               style={{
@@ -1687,8 +1693,40 @@ function OptionsPageInner() {
               prevClose={chartTarget.prevClose}
               ltpChange={chartTarget.ltpChange}
               onClose={() => setChartTarget(null)}
-              onOpenChain={(idx) => { setChainIndex(idx); setExpiry(""); setActiveTab("chain"); setChartTarget(null); }}
+              onOpenChain={(idx) => { setChainIndex(idx); setExpiry(""); setActiveTab("chain"); setChartTarget(null); setSplitChartTarget(null); }}
             />
+          )}
+
+          {/* ── Split view: CE + PE of the same strike, side by side, both straight into technical (5m + VWAP) mode ── */}
+          {splitChartTarget && (
+            <div className="absolute inset-0 flex" style={{ zIndex: 100 }}>
+              <div className="relative flex-1 border-r" style={{ borderColor: "#1e293b" }}>
+                <TradingChartModal
+                  token={splitChartTarget.ce.token}
+                  strike={splitChartTarget.ce.strike}
+                  type={splitChartTarget.ce.type}
+                  expiry={splitChartTarget.ce.expiry}
+                  sym={splitChartTarget.ce.sym}
+                  tradingsymbol={splitChartTarget.ce.tradingsymbol}
+                  index={splitChartTarget.ce.index}
+                  startInTechnical
+                  onClose={() => setSplitChartTarget(null)}
+                />
+              </div>
+              <div className="relative flex-1">
+                <TradingChartModal
+                  token={splitChartTarget.pe.token}
+                  strike={splitChartTarget.pe.strike}
+                  type={splitChartTarget.pe.type}
+                  expiry={splitChartTarget.pe.expiry}
+                  sym={splitChartTarget.pe.sym}
+                  tradingsymbol={splitChartTarget.pe.tradingsymbol}
+                  index={splitChartTarget.pe.index}
+                  startInTechnical
+                  onClose={() => setSplitChartTarget(null)}
+                />
+              </div>
+            </div>
           )}
 
           {!data && (
@@ -2023,6 +2061,14 @@ function OptionsPageInner() {
                       }}
                       onOpenChart={(token, strike, type, sym, tradingsymbol) => {
                         setChartTarget({ token, strike, type: type as "CE" | "PE", expiry, sym, tradingsymbol, index: chainIndex });
+                        setSplitChartTarget(null);
+                      }}
+                      onOpenSplitChart={() => {
+                        setSplitChartTarget({
+                          ce: { token: row.ce.token, strike: row.strike, type: "CE", expiry, sym: "", tradingsymbol: row.ce.tradingsymbol, index: chainIndex },
+                          pe: { token: row.pe.token, strike: row.strike, type: "PE", expiry, sym: "", tradingsymbol: row.pe.tradingsymbol, index: chainIndex },
+                        });
+                        setChartTarget(null);
                       }}
                     />
                   </div>
@@ -2356,9 +2402,10 @@ function OptionsPageInner() {
               autoTradeEnabled={autoTradeEnabled}
               autoPositions={autoPositions}
               onToggleAutoTrade={toggleAutoTrade}
-              onOpenChart={(token, strike, type, tradingsymbol) =>
-                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", tradingsymbol, index: "NIFTY" })
-              }
+              onOpenChart={(token, strike, type, tradingsymbol) => {
+                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", tradingsymbol, index: "NIFTY" });
+                setSplitChartTarget(null);
+              }}
               chainRows={data?.rows ?? []}
             />
           )}
@@ -2392,9 +2439,10 @@ function OptionsPageInner() {
               autoTradeEnabled={vwapAutoTradeEnabled}
               autoPositions={vwapAutoPositions}
               onToggleAutoTrade={toggleVwapAutoTrade}
-              onOpenChart={(token, strike, type, tradingsymbol) =>
-                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", tradingsymbol, index: "NIFTY" })
-              }
+              onOpenChart={(token, strike, type, tradingsymbol) => {
+                setChartTarget({ token, strike, type, expiry: niftyExpiry || expiry, sym: "", tradingsymbol, index: "NIFTY" });
+                setSplitChartTarget(null);
+              }}
               chainRows={data?.rows ?? []}
             />
           )}
@@ -2407,9 +2455,10 @@ function OptionsPageInner() {
               <div className="h-full flex flex-col overflow-hidden">
                 
                 {/* ── Index swiper ── */}
-                <IndexSwiper onOpenChart={(token, tradingsymbol, exchange, prevClose, ltpChange) =>
-                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true, isIndex: true, prevClose, ltpChange })
-                } />
+                <IndexSwiper onOpenChart={(token, tradingsymbol, exchange, prevClose, ltpChange) => {
+                  setChartTarget({ token, strike: 0, type: "CE", expiry: "", sym: tradingsymbol, tradingsymbol, index: exchange === "BSE" ? "SENSEX" : "NIFTY", isEquity: true, isIndex: true, prevClose, ltpChange });
+                  setSplitChartTarget(null);
+                }} />
                 
                 {/* ── Header: watchlist tabs + create + search ── */}
                 <div className="flex-shrink-0 px-3 pt-3 pb-2 flex flex-col gap-2"
@@ -2585,9 +2634,10 @@ function OptionsPageInner() {
                             expiry={wExpiry}
                             isDragOver={wlDragOverToken === w.leg.token}
                             onRemove={() => removeWatch(w.leg.token)}
-                            onOpenChart={(token, strike, type) =>
-                              setChartTarget({ token, strike, type, expiry: wExpiry, sym, tradingsymbol: sym, index: wIndex, isEquity: wIsEquity })
-                            }
+                            onOpenChart={(token, strike, type) => {
+                              setChartTarget({ token, strike, type, expiry: wExpiry, sym, tradingsymbol: sym, index: wIndex, isEquity: wIsEquity });
+                              setSplitChartTarget(null);
+                            }}
                             onDragStart={() => setWlDragToken(w.leg.token)}
                             onDragOver={(e) => { e.preventDefault(); setWlDragOverToken(w.leg.token); }}
                             onDrop={() => {
@@ -2654,7 +2704,7 @@ function OptionsPageInner() {
         }}
       >
         <button
-          onClick={() => { setActiveTab("account"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("account"); setChartTarget(null); setSplitChartTarget(null); }}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "account" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2664,7 +2714,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => { setActiveTab("chain"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("chain"); setChartTarget(null); setSplitChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "chain" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2674,7 +2724,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => { setActiveTab("smc"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("smc"); setChartTarget(null); setSplitChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "smc" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2692,7 +2742,7 @@ function OptionsPageInner() {
           )}
         </button>
         <button
-          onClick={() => { setActiveTab("vwap930"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("vwap930"); setChartTarget(null); setSplitChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "vwap930" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2710,7 +2760,7 @@ function OptionsPageInner() {
           )}
         </button>
         <button
-          onClick={() => { setActiveTab("watchlist"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("watchlist"); setChartTarget(null); setSplitChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "watchlist" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2732,7 +2782,7 @@ function OptionsPageInner() {
           )}
         </button>
         <button
-          onClick={() => { setActiveTab("ohlc"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("ohlc"); setChartTarget(null); setSplitChartTarget(null); }}
           className="relative flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "ohlc" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2742,7 +2792,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => { setActiveTab("results"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("results"); setChartTarget(null); setSplitChartTarget(null); }}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "results" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2752,7 +2802,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => { setActiveTab("journal"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("journal"); setChartTarget(null); setSplitChartTarget(null); }}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "journal" ? "#ea580c" : "#94a3b8" }}
         >
@@ -2762,7 +2812,7 @@ function OptionsPageInner() {
           </span>
         </button>
         <button
-          onClick={() => { setActiveTab("holidays"); setChartTarget(null); }}
+          onClick={() => { setActiveTab("holidays"); setChartTarget(null); setSplitChartTarget(null); }}
           className="flex flex-col items-center justify-center flex-1 h-full gap-0.5 cursor-pointer border-0 bg-transparent"
           style={{ color: activeTab === "holidays" ? "#ea580c" : "#94a3b8" }}
         >
@@ -3194,6 +3244,7 @@ function ChainRow({
   strategyOn,
   onOrder,
   onOpenChart,
+  onOpenSplitChart,
 }: {
   row: OptionsRow;
   atmStrike: number;
@@ -3210,6 +3261,7 @@ function ChainRow({
     sym: string,
     tradingsymbol?: string,
   ) => void;
+  onOpenSplitChart: () => void;
 }) {
   const { ce, pe, strike, isATM } = row;
   const rowBg = isATM ? "bg-[#eff6ff]" : "bg-white hover:bg-[#f8fafc]";
@@ -3340,6 +3392,10 @@ function ChainRow({
             >
               PCR {rowPCR.toFixed(2)}
             </span>
+            <button onClick={onOpenSplitChart} title={`CE + PE ${strike} split chart`}
+              className="w-5 h-5 flex items-center justify-center rounded cursor-pointer border border-[#0284c7]/30 bg-[#0284c7]/10 text-[#0284c7] hover:bg-[#0284c7]/20 transition-colors">
+              <IconColumns size={11} />
+            </button>
           </div>
 
           {/* PE side */}
@@ -3510,6 +3566,10 @@ function ChainRow({
                 ATM
               </div>
             )}
+            <button onClick={onOpenSplitChart} title={`CE + PE ${strike} split chart`}
+              className="mt-1 w-5 h-5 flex items-center justify-center rounded cursor-pointer border border-[#0284c7]/30 bg-[#0284c7]/10 text-[#0284c7] hover:bg-[#0284c7]/20 transition-colors">
+              <IconColumns size={11} />
+            </button>
           </div>
 
           {/* PE LTP + chart icon */}

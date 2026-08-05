@@ -62,6 +62,7 @@ export interface TradingChartModalProps {
   ltpChange?: number;   // passed from IndexSwiper for simple view
   onClose: () => void;
   onOpenChain?: (chainIndex: "NIFTY" | "SENSEX") => void;
+  startInTechnical?: boolean; // open directly in candle/technical mode (5m + VWAP), skipping the simple/area view
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -211,7 +212,7 @@ const SIMPLE_PERIOD_DAYS: Record<string, number> = {
 
 export default function TradingChartModal({
   token, strike, type, expiry, sym, tradingsymbol, index = "NIFTY", isEquity = false, isIndex = false,
-  prevClose, ltpChange, onClose, onOpenChain,
+  prevClose, ltpChange, onClose, onOpenChain, startInTechnical = false,
 }: TradingChartModalProps) {
   const { theme } = useTheme();
   const isDark = theme === "dark";
@@ -232,13 +233,13 @@ export default function TradingChartModal({
   const chartBdr  = isDark ? "#1e293b"  : "#e2e8f0";
 
   // ── UI state ────────────────────────────────────────────────────────────────
-  const [tf, setTf]         = useState<TfLabel>("1m");
-  const [chartType, setCT]  = useState<ChartType>("area");
-  const [simpleMode, setSimpleMode] = useState(true);
+  const [tf, setTf]         = useState<TfLabel>(startInTechnical ? "5m" : "1m");
+  const [chartType, setCT]  = useState<ChartType>(startInTechnical ? "candle" : "area");
+  const [simpleMode, setSimpleMode] = useState(!startInTechnical);
   const [simplePeriod, setSimplePeriod] = useState("1D");
   const [todayStats, setTodayStats] = useState<{ open: number; high: number; low: number } | null>(null);
   const [derivedPrevClose, setDerivedPrevClose] = useState<number | null>(null);
-  const [indicators, setInd]= useState<Set<Indicator>>(new Set<Indicator>());
+  const [indicators, setInd]= useState<Set<Indicator>>(new Set<Indicator>(startInTechnical ? ["VWAP"] : []));
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState<string | null>(null);
   const [livePrice, setLP]  = useState<number | null>(null);
@@ -391,7 +392,7 @@ export default function TradingChartModal({
   const currentRef   = useRef<Candle | null>(null);
   const tfMinRef     = useRef(1);
   const ctRef        = useRef<ChartType>("candle");
-  const indRef       = useRef<Set<Indicator>>(new Set<Indicator>());
+  const indRef       = useRef<Set<Indicator>>(new Set<Indicator>(startInTechnical ? ["VWAP"] : []));
   const tlDataRef    = useRef<typeof tradeLines>(null);
   const tlSeriesRef  = useRef<{ ep:any; tp:any; t2:any; sp:any } | null>(null);
   const isDarkRef    = useRef(isDark);

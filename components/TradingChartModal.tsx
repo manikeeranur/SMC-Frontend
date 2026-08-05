@@ -1362,7 +1362,7 @@ export default function TradingChartModal({
         {/* Simple mode — Tech Chart icon button only */}
         {simpleMode && (
           <div className="absolute z-20" style={{ bottom: 65, right: 65 }}>
-            <button onClick={() => { setCT("candle"); setTf("1m"); setSimpleMode(false); }}
+            <button onClick={() => { setCT("candle"); setTf("5m"); indRef.current = new Set<Indicator>(["VWAP"]); setInd(new Set(indRef.current)); setSimpleMode(false); }}
               title="Tech Chart"
               className="w-9 h-9 flex items-center justify-center rounded-full cursor-pointer transition-all hover:scale-105 active:scale-95"
               style={{ background: isDark ? "#1e3a5fdd" : "#2563ebdd", color: "#fff", boxShadow: "0 2px 8px rgba(0,0,0,0.25)" }}>

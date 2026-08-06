@@ -8,7 +8,7 @@ import {
   AreaSeries,
   HistogramSeries,
 } from "lightweight-charts";
-import { IconX, IconChevronLeft, IconChartBar, IconCurrencyRupee, IconLayoutGrid } from "@tabler/icons-react";
+import { IconX, IconChevronLeft, IconChartBar, IconCurrencyRupee, IconLayoutGrid, IconCamera, IconCheck } from "@tabler/icons-react";
 import {
   Select,
   SelectContent,
@@ -263,6 +263,7 @@ export default function TradingChartModal({
   }, [acctQty]);
   const [tradeOpen, setTO]  = useState(false); // footer trade panel visibility
   const [indOpen,   setIndOpen] = useState(false);
+  const [shotFlash, setShotFlash] = useState(false); // brief ✓ feedback after a screenshot capture
   const [equityMode, setEquityMode] = useState<"intraday" | "swing">(isEquity ? "swing" : "intraday");
   const [equityQty, setEquityQty] = useState(1);
   const [equityQtyStr, setEquityQtyStr] = useState("1");
@@ -1091,6 +1092,26 @@ export default function TradingChartModal({
     };
   }
 
+  // ── Capture a PNG screenshot of the chart (candles + all visible indicator
+  // overlays — lightweight-charts renders this from the live canvas) and
+  // download it. ─────────────────────────────────────────────────────────────
+  function captureScreenshot() {
+    try {
+      const canvas = chartRef.current?.takeScreenshot?.();
+      if (!canvas) return;
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const name  = (tradingsymbol || sym || chartLabel || "chart").replace(/\s+/g, "_");
+      const a = document.createElement("a");
+      a.href = canvas.toDataURL("image/png");
+      a.download = `${name}_${tf}_${stamp}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setShotFlash(true);
+      setTimeout(() => setShotFlash(false), 1500);
+    } catch {}
+  }
+
   // ── Place order ────────────────────────────────────────────────────────────
   async function placeOrder(action: "BUY" | "SELL") {
     const tsym = tradingsymbol ?? sym;
@@ -1296,6 +1317,13 @@ export default function TradingChartModal({
             </div>
           )}
         </div>
+
+        {/* Screenshot */}
+        <button onClick={captureScreenshot} title="Capture chart screenshot"
+          className="w-7 h-7 flex items-center justify-center rounded-full cursor-pointer flex-shrink-0 transition-colors hover:opacity-70"
+          style={{ background: shotFlash ? "#16a34a" : btnBg, color: shotFlash ? "#fff" : txtMuted }}>
+          {shotFlash ? <IconCheck size={13} /> : <IconCamera size={13} />}
+        </button>
 
         {/* Close X */}
         <button onClick={onClose}

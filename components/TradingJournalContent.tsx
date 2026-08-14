@@ -7,7 +7,7 @@ import { useHolidaysMap } from "@/lib/holidays";
 import { useAccountQty } from "@/lib/useAccountQty";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 
-const API    = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
+const API    = process.env.NEXT_PUBLIC_API_URL || "http://56.228.43.250:4000";
 const MONO   = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS  = { fontFamily: "'Bebas Neue', sans-serif" } as const;
 const ACCENT = "#7c3aed";

@@ -603,7 +603,7 @@ function OptionsPageInner() {
   // ── SMC alerts fetch + manual trigger ─────────────────────────────────────
   async function handleCopyToken() {
     try {
-      const API = process.env.NEXT_PUBLIC_API_URL!;
+      const API = process.env.NEXT_PUBLIC_API_URL || "http://56.228.43.250:4000";
       const res = await fetch(`${API}/api/auth/token-value`);
       const data = await res.json();
       if (!data.access_token) return;

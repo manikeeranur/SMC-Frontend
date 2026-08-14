@@ -1,6 +1,6 @@
 import { SMC_MIN_PREMIUM } from "./constants";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
+const API = process.env.NEXT_PUBLIC_API_URL || "http://56.228.43.250:4000";
 
 const DEMO = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
@@ -256,7 +256,7 @@ export const watchlistApi = {
 
 export function createWS(onMessage: (msg: any) => void): WebSocket | null {
   if (typeof window === "undefined") return null;
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "wss://13.61.175.6:4000";
+  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || "ws://56.228.43.250:4000";
   const ws = new WebSocket(wsUrl);
   ws.onopen = () => console.log("[WS] Connected to backend");
   ws.onmessage = (e) => {

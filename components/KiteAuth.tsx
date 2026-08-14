@@ -6,7 +6,7 @@ import { IconBolt, IconLoader2 } from "@tabler/icons-react";
 
 const MONO  = { fontFamily: "'Space Mono', monospace" } as const;
 const BEBAS = { fontFamily: "'Bebas Neue', sans-serif" } as const;
-const API   = process.env.NEXT_PUBLIC_API_URL || "http://13.61.175.6:4000";
+const API   = process.env.NEXT_PUBLIC_API_URL || "http://56.228.43.250:4000";
 
 interface Props {
   onConnected: (userName: string) => void;

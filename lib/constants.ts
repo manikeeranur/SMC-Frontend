@@ -10,16 +10,19 @@ export const SMC_MIN_PREMIUM = 200;
 export const SMC_MAX_PREMIUM = 300;
 
 // ─── VWAP 9:30 Strategy ─────────────────────────────────────────────────────────
-// No entries before 09:30 IST (continuous scan after that, no fixed
+// No entries before 09:36 IST (continuous scan after that, no fixed
 // checkpoint) · CE/PE whose premium is ₹130–₹150 AND whose own 3-min candle
-// CLOSES above its VWAP · immediate exit if that candle closes below VWAP,
-// no waiting for SL/Target · single entry per day · Target +8% / SL −8% (1:1)
+// CLOSES above its VWAP · exits on Target/SL, the 3:20pm square-off, or the
+// stagnant timeout · at most 2 entries/day — a TARGET ends the day, a
+// re-entry happens only after SL/stagnant, and whatever the 2nd entry does,
+// there's never a 3rd · Target +30% / SL −8%
 export const VWAP930_MIN_PREMIUM = 130;
 export const VWAP930_MAX_PREMIUM = 150;
 export const VWAP930_SL_PCT      = 8;   // stop loss  −8%
-export const VWAP930_TARGET_PCT  = 8;   // target     +8%
-export const VWAP930_NUM_LOTS    = 10;  // 10 lots, single entry per day
-export const VWAP930_ENTRY_TIME  = "09:30"; // no entries before this — not a fixed checkpoint
+export const VWAP930_TARGET_PCT  = 30;  // target     +30%
+export const VWAP930_NUM_LOTS    = 10;  // 10 lots
+export const VWAP930_ENTRY_TIME  = "09:36"; // no entries before this — not a fixed checkpoint
+export const VWAP930_MAX_TRADES_PER_DAY = 2; // ← keep in sync with backend VWAP930_MAX_TRADES_PER_DAY
 
 export const LOT_SIZES: Record<string, number> = {
   NIFTY:   LOT_SIZE,

@@ -42,7 +42,7 @@ import {
   AuthError,
 } from "@/lib/api";
 
-import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, VWAP930_MIN_PREMIUM, VWAP930_MAX_PREMIUM, VWAP930_SL_PCT, VWAP930_TARGET_PCT, VWAP930_NUM_LOTS, VWAP930_ENTRY_TIME } from "@/lib/constants";
+import { LOT_SIZE, SENSEX_LOT_SIZE, NUM_LOTS, SMC_MIN_PREMIUM, SMC_MAX_PREMIUM, VWAP930_MIN_PREMIUM, VWAP930_MAX_PREMIUM, VWAP930_SL_PCT, VWAP930_TARGET_PCT, VWAP930_NUM_LOTS, VWAP930_ENTRY_TIME, VWAP930_MAX_TRADES_PER_DAY } from "@/lib/constants";
 import { useAccountQty } from "@/lib/useAccountQty";
 import { useHolidays } from "@/lib/holidays";
 import HolidaysTab from "@/components/HolidaysTab";
@@ -6908,8 +6908,8 @@ function VWAP930TableView({
         </span>
         <span className="text-[7px] text-[#94a3b8]" style={MONO}>
           NIFTY premium ₹{VWAP930_MIN_PREMIUM}–₹{VWAP930_MAX_PREMIUM} · green strong-bodied 3-min candle close above own VWAP ·
-          SL −{VWAP930_SL_PCT}% · Target +{VWAP930_TARGET_PCT}% · immediate exit on candle close below VWAP ·
-          entry any time after {VWAP930_ENTRY_TIME} · 1 trade/day · {acctQty} lots
+          SL −{VWAP930_SL_PCT}% · Target +{VWAP930_TARGET_PCT}% ·
+          entry any time after {VWAP930_ENTRY_TIME} · up to {VWAP930_MAX_TRADES_PER_DAY} trades/day · {acctQty} lots
         </span>
       </div>
 
